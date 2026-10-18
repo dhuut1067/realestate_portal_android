@@ -1,0 +1,215 @@
+package kr.co.estate.portal
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+
+// Pixel 7 에뮬레이터 -> 같은 PC의 Django API(8001)
+private const val DJANGO_BASE_URL = "http://10.0.2.2:8001"
+
+private data class RegionOption(val code: String, val name: String)
+
+data class ServerApartment(
+    val kaptCode: String,
+    val name: String,
+    val dong: String,
+    val bjdCode: String
+)
+
+private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
+
+private suspend fun apiArray(endpoint: String, params: Map<String, String> = emptyMap()): JSONArray =
+    withContext(Dispatchers.IO) {
+        val query = params.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
+        val url = URL("$DJANGO_BASE_URL$endpoint" + if (query.isEmpty()) "" else "?$query")
+        val connection = url.openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = 7000
+            connection.readTimeout = 12000
+            connection.setRequestProperty("Accept", "application/json")
+            val status = connection.responseCode
+            if (status !in 200..299) error("API HTTP $status (${url.path})")
+            JSONArray(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+private suspend fun loadRegions(endpoint: String, params: Map<String, String> = emptyMap()): List<RegionOption> {
+    val array = apiArray(endpoint, params)
+    return (0 until array.length()).mapNotNull { i ->
+        val item = array.optJSONObject(i) ?: return@mapNotNull null
+        val code = item.optString("code")
+        val name = item.optString("name")
+        if (code.isBlank() || name.isBlank()) null else RegionOption(code, name)
+    }.distinctBy { it.code }
+}
+
+private suspend fun loadApartments(params: Map<String, String>): List<ServerApartment> {
+    val array = apiArray("/api/apartment-options/", params + ("limit" to "500"))
+    return (0 until array.length()).mapNotNull { i ->
+        val item = array.optJSONObject(i) ?: return@mapNotNull null
+        val code = item.optString("kapt_code")
+        if (code.isBlank()) null else ServerApartment(
+            kaptCode = code,
+            name = item.optString("kapt_name"),
+            dong = item.optString("dong_name"),
+            bjdCode = item.optString("bjd_code")
+        )
+    }.distinctBy { it.kaptCode }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> SelectionButton(
+    label: String,
+    selected: T?,
+    items: List<T>,
+    title: (T) -> String,
+    enabled: Boolean,
+    onSelect: (T) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { if (enabled) expanded = !expanded }) {
+        OutlinedTextField(
+            value = selected?.let(title) ?: "$label 선택",
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor()
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            items.forEach { option ->
+                DropdownMenuItem(text = { Text(title(option)) }, onClick = {
+                    expanded = false
+                    onSelect(option)
+                })
+            }
+        }
+    }
+}
+
+@Composable
+fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
+    var sido by remember { mutableStateOf<RegionOption?>(null) }
+    var sigungu by remember { mutableStateOf<RegionOption?>(null) }
+    var dong by remember { mutableStateOf<RegionOption?>(null) }
+    var ri by remember { mutableStateOf<RegionOption?>(null) }
+    var apartment by remember { mutableStateOf<ServerApartment?>(null) }
+
+    var sidos by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
+    var sigungus by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
+    var dongs by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
+    var apartments by remember { mutableStateOf<List<ServerApartment>>(emptyList()) }
+    var pending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        pending = true
+        try { sidos = loadRegions("/api/sidos/") }
+        catch (e: Exception) { error = e.message }
+        finally { pending = false }
+    }
+    LaunchedEffect(sido?.code) {
+        sigungus = emptyList()
+        val code = sido?.code ?: return@LaunchedEffect
+        pending = true; error = null
+        try { sigungus = loadRegions("/api/sigungus/", mapOf("sido_code" to code)) }
+        catch (e: Exception) { error = e.message }
+        finally { pending = false }
+    }
+    LaunchedEffect(sigungu?.code) {
+        dongs = emptyList()
+        val code = sigungu?.code ?: return@LaunchedEffect
+        pending = true; error = null
+        try { dongs = loadRegions("/api/dongs/", mapOf("sigungu_code" to code)) }
+        catch (e: Exception) { error = e.message }
+        finally { pending = false }
+    }
+    LaunchedEffect(dong?.code) {
+        apartments = emptyList()
+        val code = dong?.code ?: return@LaunchedEffect
+        pending = true; error = null
+        try { apartments = loadApartments(mapOf("dong_code" to code)) }
+        catch (e: Exception) { error = e.message }
+        finally { pending = false }
+    }
+
+    // 기존 API는 읍면동까지 제공하고, 별도의 리 목록 API는 없습니다.
+    // 단지 법정동코드의 마지막 두 자리가 서로 다를 때에만 하위 구역을 선택하도록 합니다.
+    val riOptions = remember(apartments) {
+        apartments.filter { it.bjdCode.length == 10 && !it.bjdCode.endsWith("00") }
+            .map { a ->
+                val label = if (a.dong.endsWith("리")) a.dong else "리 코드 ${a.bjdCode.takeLast(2)}"
+                RegionOption(a.bjdCode, label)
+            }.distinctBy { it.code }.sortedBy { it.name }
+    }
+    val availableApartments = remember(apartments, ri) {
+        if (ri == null) apartments else apartments.filter { it.bjdCode == ri?.code }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("전국 아파트 단지검색", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text("지역과 단지를 순서대로 선택하십시오.", style = MaterialTheme.typography.bodySmall)
+        SelectionButton("시도", sido, sidos, { it.name }, !pending || sidos.isNotEmpty()) {
+            sido = it; sigungu = null; dong = null; ri = null; apartment = null
+        }
+        SelectionButton("시군구", sigungu, sigungus, { it.name }, sido != null && sigungus.isNotEmpty()) {
+            sigungu = it; dong = null; ri = null; apartment = null
+        }
+        SelectionButton("읍면동", dong, dongs, { it.name }, sigungu != null && dongs.isNotEmpty()) {
+            dong = it; ri = null; apartment = null
+        }
+        if (riOptions.isNotEmpty()) {
+            SelectionButton("리 (해당 지역만)", ri, riOptions, { it.name }, dong != null) {
+                ri = it; apartment = null
+            }
+            Text("리 선택은 선택 사항입니다. 전체 단지 검색은 리를 선택하지 않아도 됩니다.", style = MaterialTheme.typography.labelSmall)
+        }
+        SelectionButton("아파트", apartment, availableApartments, { it.name }, dong != null && availableApartments.isNotEmpty()) {
+            apartment = it
+        }
+        Button(onClick = { apartment?.let(onSelect) }, enabled = apartment != null && !pending,
+            modifier = Modifier.fillMaxWidth()) {
+            Text("검색")
+        }
+        if (pending) LinearProgressIndicator(Modifier.fillMaxWidth())
+        error?.let { Text("서버 연결 오류: $it", color = MaterialTheme.colorScheme.error) }
+        if (dong != null && !pending) Text("해당 지역 단지 ${availableApartments.size}개", style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+fun ServerApartmentDetail(apt: ServerApartment) {
+    var tab by remember(apt.kaptCode) { mutableIntStateOf(0) }
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = tab) {
+            listOf("실거래", "단지정보", "중개사·매물").forEachIndexed { i, title ->
+                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
+            }
+        }
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(apt.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(apt.dong)
+            Text("단지코드: ${apt.kaptCode}")
+            Text(when (tab) {
+                0 -> "실거래 데이터 API 연결 예정"
+                1 -> "법정동코드 ${apt.bjdCode} · 상세정보 API 연결 예정"
+                else -> "중개사·매물 API 연결 예정"
+            })
+        }
+    }
+}
