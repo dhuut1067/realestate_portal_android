@@ -20,3 +20,24 @@ captures/
 .DS_Store
 hs_err_pid*.log
 replay_pid*.log
+
+# Local settings and generated files
+local.properties
+.gradle/
+.kotlin/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+.idea/
+*.iml
+
+# Credentials
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+keystore.properties
+key.properties
+*-firebase-adminsdk-*.json

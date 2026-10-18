@@ -63,6 +63,7 @@ private enum class Page(val label: String, val icon: ImageVector) {
     var pageName by rememberSaveable { mutableStateOf(Page.Search.name) }
     val page = Page.valueOf(pageName)
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedServerApartment by remember { mutableStateOf<ServerApartment?>(null) }
     var registration by rememberSaveable { mutableStateOf<String?>(null) }
     val apartments = remember(repository) { repository.apartments() }
     val listings = remember(repository) { repository.listings() }
@@ -71,14 +72,14 @@ private enum class Page(val label: String, val icon: ImageVector) {
         favorites = if (id in favorites) favorites - id else favorites + id
         prefs.edit().putStringSet("favorites", favorites).apply()
     }
-    BackHandler(selected != null || registration != null) { selectedId = null; registration = null }
+    BackHandler(selected != null || selectedServerApartment != null || registration != null) { selectedId = null; selectedServerApartment = null; registration = null }
     Scaffold(
         topBar = {
             TopAppBar(title = { Column {
-                Text(selected?.name ?: "부동산 포털", fontWeight = FontWeight.Bold)
-                Text(if (selected != null) selected.address else "단지에서 시작하는 부동산 정보", style = MaterialTheme.typography.labelMedium)
+                Text(selectedServerApartment?.name ?: selected?.name ?: "부동산 포털", fontWeight = FontWeight.Bold)
+                Text(selectedServerApartment?.dong ?: if (selected != null) selected.address else "단지에서 시작하는 부동산 정보", style = MaterialTheme.typography.labelMedium)
             } }, navigationIcon = {
-                if (selected != null) IconButton(onClick = { selectedId = null }) {
+                if (selected != null || selectedServerApartment != null) IconButton(onClick = { selectedId = null; selectedServerApartment = null }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로")
                 }
             }, actions = {
@@ -90,19 +91,20 @@ private enum class Page(val label: String, val icon: ImageVector) {
             NavigationBar {
                 Page.entries.forEach { destination ->
                     NavigationBarItem(selected = page == destination, onClick = {
-                        pageName = destination.name; selectedId = null
+                        pageName = destination.name; selectedId = null; selectedServerApartment = null
                     }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) })
                 }
             }
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+            if (selectedServerApartment == null && page != Page.Search) Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
                 Text("예시 데이터 · 실제 실거래 및 매물 정보가 아닙니다", Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp), style = MaterialTheme.typography.labelSmall)
             }
-            if (selected != null) DetailScreen(selected, listings.filter { it.apartmentId == selected.id })
+            if (selectedServerApartment != null) ServerApartmentDetail(selectedServerApartment!!)
+            else if (selected != null) DetailScreen(selected, listings.filter { it.apartmentId == selected.id })
             else when (page) {
-                Page.Search -> SearchScreen(apartments, favorites, { selectedId = it }, ::toggle)
+                Page.Search -> ServerSearchScreen { selectedServerApartment = it }
                 Page.Saved -> ApartmentList(apartments.filter { it.id in favorites }, favorites,
                     "관심단지 ${favorites.size}곳", { selectedId = it }, ::toggle, "단지의 하트를 눌러 관심단지를 저장하세요.")
                 Page.Listings -> ListingsScreen(listings, apartments) { selectedId = it }
