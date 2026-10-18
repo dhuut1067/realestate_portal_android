@@ -1,6 +1,8 @@
 package kr.co.estate.portal
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
@@ -8,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -15,8 +18,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// Pixel 7 에뮬레이터와 Django API(같은 PC의 8001 포트)
-private const val DJANGO_BASE_URL = "http://124.56.73.200:8001"
+// 실기기에서 접속하는 운영 API. 검색과 실거래 화면에서 같은 주소를 사용합니다.
+internal const val DJANGO_BASE_URL = "http://124.56.73.200:8001"
 
 data class ServerApartment(
     val kaptCode: String,
@@ -26,6 +29,16 @@ data class ServerApartment(
 )
 
 private data class RegionOption(val code: String, val name: String)
+
+// 서버 일시 장애에도 시·도 자체는 선택할 수 있습니다. 하위 지역은 서버 자료만 사용합니다.
+private val defaultSidos = listOf(
+    "11" to "서울특별시", "26" to "부산광역시", "27" to "대구광역시",
+    "28" to "인천광역시", "29" to "광주광역시", "30" to "대전광역시",
+    "31" to "울산광역시", "36" to "세종특별자치시", "41" to "경기도",
+    "51" to "강원특별자치도", "43" to "충청북도", "44" to "충청남도",
+    "52" to "전북특별자치도", "46" to "전라남도", "47" to "경상북도",
+    "48" to "경상남도", "50" to "제주특별자치도"
+).map { RegionOption(it.first, it.second) }
 
 private fun encoded(value: String): String = URLEncoder.encode(value, "UTF-8")
 
@@ -84,7 +97,8 @@ private fun <T> ChoiceField(
 
     OutlinedButton(
         onClick = { showDialog = true },
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled
     ) {
         Text("$title: ${value?.let(titleOf) ?: "선택하십시오"}")
     }
@@ -127,7 +141,7 @@ private fun <T> ChoiceField(
 
 @Composable
 fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
-    var sidos by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
+    var sidos by remember { mutableStateOf(defaultSidos) }
     var sigungus by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
     var dongs by remember { mutableStateOf<List<RegionOption>>(emptyList()) }
     var apartments by remember { mutableStateOf<List<ServerApartment>>(emptyList()) }
@@ -140,53 +154,48 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
+    var retry by remember { mutableIntStateOf(0) }
+
+    // 하나의 조회 작업으로 관리하여 지역 변경 시 이전 요청을 취소합니다.
+    LaunchedEffect(sido?.code, sigungu?.code, dong?.code, retry) {
+        val selectedSido = sido
+        val selectedSigungu = sigungu
+        val selectedDong = dong
         loading = true
-        try { sidos = getRegions("/api/sidos/"); error = null }
-        catch (e: Exception) { error = "시도 조회 실패: ${e.message}" }
-        finally { loading = false }
-    }
-    LaunchedEffect(sido?.code) {
-        sigungus = emptyList()
-        if (sido != null) {
-            loading = true
-            try {
-                sigungus = getRegions("/api/sigungus/?sido_code=${encoded(sido!!.code)}")
-                error = null
-            } catch (e: Exception) { error = "시군구 조회 실패: ${e.message}" }
-            finally { loading = false }
-        }
-    }
-    LaunchedEffect(sigungu?.code) {
-        dongs = emptyList()
-        if (sigungu != null) {
-            loading = true
-            try {
-                dongs = getRegions("/api/dongs/?sigungu_code=${encoded(sigungu!!.code)}")
-                error = null
-            } catch (e: Exception) { error = "읍면동 조회 실패: ${e.message}" }
-            finally { loading = false }
-        }
-    }
-    LaunchedEffect(dong?.code) {
-        apartments = emptyList()
-        if (dong != null) {
-            loading = true
-            try {
-                apartments = getApartments(dong!!.code)
-                error = null
-            } catch (e: Exception) { error = "아파트 조회 실패: ${e.message}" }
-            finally { loading = false }
+        error = null
+        try {
+            when {
+                selectedDong != null -> apartments = getApartments(selectedDong.code)
+                selectedSigungu != null -> dongs = getRegions("/api/dongs/?sigungu_code=${encoded(selectedSigungu.code)}")
+                selectedSido != null -> sigungus = getRegions("/api/sigungus/?sido_code=${encoded(selectedSido.code)}")
+                else -> {
+                    val serverSidos = getRegions("/api/sidos/")
+                    if (serverSidos.isEmpty()) throw IllegalStateException("서버의 시·도 목록이 비어 있습니다.")
+                    sidos = serverSidos
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val stage = when {
+                selectedDong != null -> "아파트"
+                selectedSigungu != null -> "읍면동"
+                selectedSido != null -> "시군구"
+                else -> "시·도"
+            }
+            error = "$stage 조회 실패: ${e.message}"
+        } finally {
+            loading = false
         }
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("전국 아파트 단지검색", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("지역과 단지를 순서대로 선택하십시오.", style = MaterialTheme.typography.bodySmall)
-        ChoiceField("시도", sido, sidos, { it.name }, !loading && sidos.isNotEmpty()) {
+        ChoiceField("시도", sido, sidos, { it.name }, sidos.isNotEmpty()) {
             sido = it; sigungu = null; dong = null; apartment = null
             sigungus = emptyList(); dongs = emptyList(); apartments = emptyList()
         }
@@ -203,7 +212,11 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
             apartment = it
         }
         if (loading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+            Text("서버: $DJANGO_BASE_URL", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { retry++ }, enabled = !loading) { Text("다시 조회") }
+        }
         if (!loading && dong != null && error == null) {
             Text("선택 지역 단지 ${apartments.size}개", style = MaterialTheme.typography.bodySmall)
         }

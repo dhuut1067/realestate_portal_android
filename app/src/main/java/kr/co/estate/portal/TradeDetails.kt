@@ -72,7 +72,7 @@ fun ServerApartmentDetail(apt: ServerApartment) {
     var tab by remember(apt.kaptCode) { mutableIntStateOf(0) }
     LaunchedEffect(apt.kaptCode, retry) {
         loading = true; failure = null
-        try { data = loadActualTrades("http://124.56.73.200:8001", apt.kaptCode) }
+        try { data = loadActualTrades(DJANGO_BASE_URL, apt.kaptCode) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { failure = e.message ?: "실거래 조회 실패" }
         finally { loading = false }
