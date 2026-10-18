@@ -16,7 +16,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 // Pixel 7 에뮬레이터와 Django API(같은 PC의 8001 포트)
-private const val DJANGO_BASE_URL = "http://10.0.2.2:8001"
+private const val DJANGO_BASE_URL = "http://124.56.73.200:8001"
 
 data class ServerApartment(
     val kaptCode: String,
@@ -71,7 +71,6 @@ private suspend fun getApartments(dongCode: String): List<ServerApartment> {
     }.distinctBy { it.kaptCode }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun <T> ChoiceField(
     title: String,
@@ -81,30 +80,48 @@ private fun <T> ChoiceField(
     enabled: Boolean,
     onChoose: (T) -> Unit
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    LaunchedEffect(enabled) { if (!enabled) expanded = false }
-    ExposedDropdownMenuBox(
-        expanded = expanded && enabled,
-        onExpandedChange = { if (enabled) expanded = !expanded },
+    var showDialog by remember { mutableStateOf(false) }
+
+    OutlinedButton(
+        onClick = { showDialog = true },
         modifier = Modifier.fillMaxWidth()
     ) {
-        OutlinedTextField(
-            value = value?.let(titleOf) ?: "선택하십시오",
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(title) },
-            enabled = enabled,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor()
-        )
-        ExposedDropdownMenu(expanded = expanded && enabled, onDismissRequest = { expanded = false }) {
-            options.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(titleOf(option)) },
-                    onClick = { expanded = false; onChoose(option) }
-                )
+        Text("$title: ${value?.let(titleOf) ?: "선택하십시오"}")
+    }
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("$title 선택") },
+            text = {
+                if (options.isEmpty()) {
+                    Text("목록이 없습니다. 앞 단계 선택 또는 서버 연결 상태를 확인하십시오.")
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp)
+                    ) {
+                        items(options.size) { index ->
+                            val option = options[index]
+                            TextButton(
+                                onClick = {
+                                    showDialog = false
+                                    onChoose(option)
+                                },
+                                enabled = enabled,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(titleOf(option))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDialog = false }) {
+                    Text("닫기")
+                }
             }
-        }
+        )
     }
 }
 
@@ -199,7 +216,7 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
 }
 
 @Composable
-fun ServerApartmentDetail(apt: ServerApartment) {
+fun LegacyServerApartmentDetail(apt: ServerApartment) {
     var tab by remember(apt.kaptCode) { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = tab) {
