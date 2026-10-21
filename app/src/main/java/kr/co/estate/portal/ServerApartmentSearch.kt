@@ -193,12 +193,21 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
         }
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        KakaoApartmentMap(apartments, apartment,
-            listOfNotNull(sido?.name, sigungu?.name, dong?.name).joinToString(" "), onSelect)
+    Column(Modifier.fillMaxSize()) {
+        // Keep the native map visible while the region/selection form scrolls below it.
+        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            KakaoApartmentMap(
+                apartments = apartments,
+                selected = apartment,
+                region = listOfNotNull(sido?.name, sigungu?.name, dong?.name).joinToString(" "),
+                onSelect = onSelect
+            )
+        }
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth()
+                .verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
         Text("전국 아파트 단지검색", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("지역과 단지를 순서대로 선택하십시오.", style = MaterialTheme.typography.bodySmall)
         ChoiceField("시도", sido, sidos, { it.name }, sidos.isNotEmpty()) {
@@ -231,6 +240,7 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
             enabled = !loading && apartment != null,
             modifier = Modifier.fillMaxWidth()
         ) { Text("검색") }
+        }
     }
 }
 
