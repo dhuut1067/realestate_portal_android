@@ -19,13 +19,15 @@ import java.net.URL
 import java.net.URLEncoder
 
 // 실기기에서 접속하는 운영 API. 검색과 실거래 화면에서 같은 주소를 사용합니다.
-internal const val DJANGO_BASE_URL = "http://124.56.73.200:8001"
+internal const val DJANGO_BASE_URL = "http://cncvision.ipdisk.co.kr:8001"
 
 data class ServerApartment(
     val kaptCode: String,
     val name: String,
     val dong: String,
-    val bjdCode: String
+    val bjdCode: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 private data class RegionOption(val code: String, val name: String)
@@ -79,7 +81,9 @@ private suspend fun getApartments(dongCode: String): List<ServerApartment> {
             kaptCode = code,
             name = item.optString("kapt_name"),
             dong = item.optString("dong_name"),
-            bjdCode = item.optString("bjd_code")
+            bjdCode = item.optString("bjd_code"),
+            latitude = item.optDouble("latitude", item.optDouble("lat", Double.NaN)).takeIf { it.isFinite() && it in -90.0..90.0 },
+            longitude = item.optDouble("longitude", item.optDouble("lng", Double.NaN)).takeIf { it.isFinite() && it in -180.0..180.0 }
         )
     }.distinctBy { it.kaptCode }
 }
@@ -193,6 +197,8 @@ fun ServerSearchScreen(onSelect: (ServerApartment) -> Unit) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        KakaoApartmentMap(apartments, apartment,
+            listOfNotNull(sido?.name, sigungu?.name, dong?.name).joinToString(" "), onSelect)
         Text("전국 아파트 단지검색", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
         Text("지역과 단지를 순서대로 선택하십시오.", style = MaterialTheme.typography.bodySmall)
         ChoiceField("시도", sido, sidos, { it.name }, sidos.isNotEmpty()) {
@@ -249,3 +255,4 @@ fun LegacyServerApartmentDetail(apt: ServerApartment) {
         }
     }
 }
+
