@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.text.TextPaint
+import android.text.TextUtils
 import android.location.Geocoder
 import android.view.MotionEvent
 import android.view.View
@@ -59,7 +60,7 @@ private fun viewportBounds(map: KakaoMap): MapBounds? {
 @Composable
 fun KakaoApartmentMap(
     selected: ServerApartment?, region: String, regionDepth: Int,
-    focusRequest: Int, mapHeight: Dp, onSelect: (ServerApartment) -> Unit
+    focusRequest: Int, mapHeight: Dp, showMap: Boolean = true, onSelect: (ServerApartment) -> Unit
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -124,7 +125,7 @@ fun KakaoApartmentMap(
                     override fun getZoomLevel(): Int = 15
                     override fun onMapReady(current: KakaoMap) {
                         current.labelManager?.addLayer(LabelLayerOptions.from("actual-trades")
-                            .setCompetitionType(CompetitionType.Same)
+                            .setCompetitionType(CompetitionType.None)
                             .setCompetitionUnit(CompetitionUnit.IconAndText)
                             .setOrderingType(OrderingType.Rank)
                             .setZOrder(5000).setClickable(true))
@@ -152,7 +153,7 @@ fun KakaoApartmentMap(
                     view.pause(); view.finish()
                 }
             }
-            AndroidView(factory = { view }, modifier = Modifier.fillMaxWidth().height(mapHeight))
+            AndroidView(factory = { view }, update = { it.visibility = if (showMap) View.VISIBLE else View.INVISIBLE }, modifier = Modifier.fillMaxWidth().height(mapHeight))
 
             // This effect ONLY moves the camera. Loading results never moves it back.
             LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest) {
@@ -218,37 +219,32 @@ fun KakaoApartmentMap(
                 val density = context.resources.displayMetrics.density
                 val fontScale = context.resources.configuration.fontScale.coerceIn(1f, 1.2f)
                 val userScale = 1f + labelSizeStep * 0.1f
-                val pricePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 14f * density * fontScale * userScale
+                val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = 11f * density * fontScale * userScale
                 }
-                val areaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 12f * density * fontScale * userScale
-                }
+                val styleId = "uniform-card-$density-$fontScale-$labelSizeStep"
+                val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
+                    compactTradeStyles(styleId, 132f * fontScale * userScale, density, fontScale, userScale))
                 layer.removeAll()
                 apartmentsOnMap.forEachIndexed { index, apt ->
                     coroutineContext.ensureActive()
-                    val price = mapPrice(apt.latestPrice)
+                    val price = apt.latestPrice?.let { String.format(Locale.KOREA, "%.2f억", it / 10000.0) } ?: "가격 미상"
                     val area = apt.representativeArea?.let {
                         String.format(Locale.KOREA, "%.1f평", it / 3.305785)
                     } ?: "면적 미상"
-                    val contentWidth = maxOf(pricePaint.measureText(price), areaPaint.measureText(area))
-                    // Share backgrounds by 4dp width buckets, with only a small text inset.
-                    val widthBucket = ceil((contentWidth / density + 12f * userScale) / 4f)
-                        .toInt().coerceAtLeast(12)
-                    val styleId = "compact-white-edge-$widthBucket-$density-$fontScale-$labelSizeStep"
-                    val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
-                        compactTradeStyles(styleId, widthBucket * 4f, density, fontScale, userScale))
+                    val name = TextUtils.ellipsize(apt.name, textPaint,
+                        120f * density * fontScale * userScale, TextUtils.TruncateAt.END).toString()
                     val priority = if (apt.identity == selected?.identity) Long.MAX_VALUE
                         else apt.tradeCount.toLong() * 100000L + (apartmentsOnMap.size - index)
                     layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
                         .setStyles(styles)
-                        .setTexts(LabelTextBuilder().addTextLine(price, 0).addTextLine(area, 1))
+                        .setTexts(LabelTextBuilder().addTextLine(name, 0).addTextLine("$area · $price", 1))
                         .setRank(priority).setClickable(true).setTag(apt))
                     if (index % 40 == 0) yield()
                 }
             }
             if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "조회 ${count}곳 · 전용평수 · 겹침 자동 정리 · 누르면 상세",
+            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "조회 ${count}곳 · 전용평수 · 전체 라벨 표시 · 누르면 상세",
                 style = MaterialTheme.typography.bodySmall)
             val failure = mapError ?: positionError ?: loadError
             failure?.let {
@@ -270,8 +266,8 @@ private fun compactTradeStyles(
         zoom to (1f + (zoom - 15) * 0.06f).coerceIn(0.70f, 1.36f)
     }
     val styles = levels.map { (zoom, zoomScale) ->
-        val priceSize = 14f * density * fontScale * userScale * zoomScale
-        val areaSize = 12f * density * fontScale * userScale * zoomScale
+        val priceSize = 11f * density * fontScale * userScale * zoomScale
+        val areaSize = 11f * density * fontScale * userScale * zoomScale
         val pricePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = priceSize }
         val areaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = areaSize }
         val width = (baseWidthDp * density * zoomScale).roundToInt().coerceAtLeast(1)
