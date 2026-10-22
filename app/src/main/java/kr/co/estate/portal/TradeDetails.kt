@@ -31,9 +31,7 @@ private data class ActualTrade(val id: String, val date: String, val area: Doubl
 private data class TradeResponse(val rows: List<ActualTrade>, val total: Int)
 private fun moneyLabel(amount: Double?): String {
     if (amount == null) return "금액 미상"
-    val n = amount.toLong()
-    return if (n >= 10000) "${n / 10000}억" + (if (n % 10000 == 0L) "" else " ${String.format(Locale.KOREA, "%,d", n % 10000)}만")
-    else "${String.format(Locale.KOREA, "%,d", n)}만"
+    return String.format(Locale.KOREA, "%.2f억", amount / 10000.0)
 }
 private fun areaKey(area: Double?) = area?.let { String.format(Locale.US, "%.1f", it) } ?: "미상"
 private suspend fun loadActualTrades(base: String, apt: ServerApartment): TradeResponse = withContext(Dispatchers.IO) {
@@ -88,7 +86,7 @@ fun ServerApartmentDetail(apt: ServerApartment) {
     val valid = visible.filter { !it.canceled }
     Column(Modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = tab) {
-            listOf("실거래", "단지정보", "중개사·매물").forEachIndexed { i, title ->
+            listOf("실거래", "단지정보", "중개사 매물").forEachIndexed { i, title ->
                 Tab(selected = tab == i, onClick = { tab = i }, text = { Text(title) })
             }
         }
@@ -132,7 +130,7 @@ fun ServerApartmentDetail(apt: ServerApartment) {
                     }
                 }
             } else if (tab == 1) item { Text("단지코드: ${apt.kaptCode}\n법정동 코드: ${apt.bjdCode}") }
-            else item { Text("중개사·매물 연동은 아직 적용하지 않았습니다.") }
+            else item { BrokerageNavigation(apt) }
         }
     }
 }
@@ -162,7 +160,7 @@ private fun ActualTradeChart(trades: List<ActualTrade>, cutoff: String, today: S
             Text("초록: 평균가(억, 왼쪽) / 빨강: 거래건수(건, 오른쪽)", style = MaterialTheme.typography.labelSmall)
             Row(Modifier.fillMaxWidth()) {
                 Column(Modifier.width(40.dp).height(190.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                    listOf(high, (high + low) / 2, low).forEach { Text(String.format(Locale.KOREA, "%.1f", it), color = green, style = MaterialTheme.typography.labelSmall) }
+                    listOf(high, (high + low) / 2, low).forEach { Text(String.format(Locale.KOREA, "%.2f", it), color = green, style = MaterialTheme.typography.labelSmall) }
                 }
                 Canvas(Modifier.weight(1f).height(190.dp)) {
                     val step = size.width / months.size
@@ -192,6 +190,29 @@ private fun ActualTradeChart(trades: List<ActualTrade>, cutoff: String, today: S
                 Text(months.last(), style = MaterialTheme.typography.labelSmall)
             }
             Text("거래 없는 달은 0건이며 가격 선은 연결하지 않습니다.", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun BrokerageNavigation(apt: ServerApartment) {
+    var section by remember(apt.identity) { mutableIntStateOf(0) }
+    var sale by remember(apt.identity) { mutableStateOf(true) }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(selected = section == 0, onClick = { section = 0 }, label = { Text("중개사무소") })
+            FilterChip(selected = section == 1, onClick = { section = 1 }, label = { Text("매물정보") })
+        }
+        if (section == 0) {
+            Text("${apt.name} 담당 중개사무소")
+            Text("중개사무소 자료는 아직 연결되지 않았습니다.")
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = sale, onClick = { sale = true }, label = { Text("매매") })
+                FilterChip(selected = !sale, onClick = { sale = false }, label = { Text("전월세") })
+            }
+            Text(if (sale) "매매 매물" else "전월세 매물", style = MaterialTheme.typography.titleMedium)
+            Text("매물 자료는 아직 연결되지 않았습니다.")
         }
     }
 }
