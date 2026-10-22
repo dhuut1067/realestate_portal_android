@@ -1,6 +1,11 @@
 package kr.co.estate.portal
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.text.TextPaint
+import android.text.TextUtils
 import android.location.Geocoder
 import android.view.MotionEvent
 import android.view.View
@@ -31,6 +36,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.util.Locale
+import kotlin.math.roundToInt
 
 private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
 
@@ -187,20 +193,23 @@ fun KakaoApartmentMap(
                     val apartments = loadViewportApartments(visible)
                     val layer = current.labelManager?.getLayer("actual-trades") ?: error("지도 단지 레이어가 없습니다.")
                     val manager = current.labelManager ?: error("지도 스타일 관리자가 없습니다.")
-                    // One shared native text style for every complex: no separate bitmap
-                    // texture per apartment, even when thousands are visible.
-                    val styles = manager.getLabelStyles("trade-price-area") ?: manager.addLabelStyles(
-                        LabelStyles.from("trade-price-area", LabelStyle.from(
-                            LabelTextStyle.from(12, Color.rgb(8, 127, 104), 2, Color.WHITE),
-                            LabelTextStyle.from(14, Color.BLACK, 2, Color.WHITE),
-                            LabelTextStyle.from(12, Color.DKGRAY, 2, Color.WHITE)
-                        )))
+                    // Scale actual pixels explicitly: the SDK's tiny unscaled text was
+                    // unreadable on high-density phones. Reuse ONE blue background/style.
+                    val density = context.resources.displayMetrics.density
+                    val fontScale = context.resources.configuration.fontScale.coerceIn(1f, 1.2f)
+                    val styleId = "trade-blue-card-$density-$fontScale"
+                    val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
+                        blueTradeCardStyle(styleId, density, fontScale))
+                    val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                        textSize = 13f * density * fontScale
+                    }
                     coroutineContext.ensureActive()
                     layer.removeAll()
                     apartments.forEachIndexed { i, apt ->
                         layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
                             .setStyles(styles).setTexts(LabelTextBuilder()
-                                .addTextLine(apt.name, 0)
+                                .addTextLine(TextUtils.ellipsize(apt.name, namePaint,
+                                    140f * density, TextUtils.TruncateAt.END).toString(), 0)
                                 .addTextLine(mapPrice(apt.latestPrice), 1)
                                 .addTextLine(apt.representativeArea?.let {
                                     String.format(Locale.KOREA, "전용 %.1f평", it / 3.305785)
@@ -223,4 +232,30 @@ fun KakaoApartmentMap(
             }
         }
     }
+}
+
+/** Opaque blue rectangle; white text is centered INSIDE the shared image. */
+private fun blueTradeCardStyle(id: String, density: Float, fontScale: Float): LabelStyles {
+    val width = (160f * density).roundToInt().coerceAtLeast(1)
+    val height = (86f * density).roundToInt().coerceAtLeast(1)
+    val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+        // Pixel dimensions are already density-scaled; prevent a second SDK scale.
+        this.density = Bitmap.DENSITY_NONE
+        eraseColor(Color.rgb(21, 101, 192))
+    }
+    val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.rgb(13, 71, 161)
+        style = Paint.Style.STROKE
+        strokeWidth = 2f * density
+    }
+    val inset = border.strokeWidth / 2f
+    Canvas(background).drawRect(inset, inset, width - inset, height - inset, border)
+    fun whiteText(size: Float) =
+        LabelTextStyle.from((size * density * fontScale).roundToInt(), Color.WHITE)
+    return LabelStyles.from(id, LabelStyle.from(background)
+        .setApplyDpScale(false)
+        .setAnchorPoint(0.5f, 0.5f)
+        .setTextGravity(MapGravity.CENTER)
+        .setPadding(0f)
+        .setTextStyles(whiteText(13f), whiteText(18f), whiteText(15f)))
 }
