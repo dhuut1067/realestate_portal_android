@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.text.TextPaint
-import android.text.TextUtils
 import android.location.Geocoder
 import android.view.MotionEvent
 import android.view.View
@@ -22,6 +21,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kakao.vectormap.*
 import com.kakao.vectormap.camera.CameraUpdateFactory
+import com.kakao.vectormap.label.CompetitionUnit
+import com.kakao.vectormap.label.OrderingType
 import com.kakao.vectormap.label.CompetitionType
 import com.kakao.vectormap.label.LabelLayerOptions
 import com.kakao.vectormap.label.LabelStyle
@@ -37,6 +38,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlin.math.ceil
 
 private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
 
@@ -70,10 +72,16 @@ fun KakaoApartmentMap(
     var positionLoading by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var count by remember { mutableIntStateOf(0) }
+    var apartmentsOnMap by remember { mutableStateOf<List<ServerApartment>>(emptyList()) }
+    var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("실거래 지도", style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text("실거래 지도", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = { labelSizeStep-- }, enabled = labelSizeStep > -2) { Text("작게") }
+            TextButton(onClick = { labelSizeStep++ }, enabled = labelSizeStep < 2) { Text("크게") }
+        }
         if (appKey.isBlank()) {
             Text("카카오 네이티브 앱 키가 없습니다.", color = MaterialTheme.colorScheme.error)
         } else {
@@ -116,7 +124,10 @@ fun KakaoApartmentMap(
                     override fun getZoomLevel(): Int = 15
                     override fun onMapReady(current: KakaoMap) {
                         current.labelManager?.addLayer(LabelLayerOptions.from("actual-trades")
-                            .setCompetitionType(CompetitionType.None).setClickable(true))
+                            .setCompetitionType(CompetitionType.Same)
+                            .setCompetitionUnit(CompetitionUnit.IconAndText)
+                            .setOrderingType(OrderingType.Rank)
+                            .setZOrder(5000).setClickable(true))
                         current.setOnLabelClickListener { _, _, label ->
                             val apartment = label.tag as? ServerApartment
                             view.post { if (active && apartment != null) select(apartment) }
@@ -191,39 +202,53 @@ fun KakaoApartmentMap(
                 loading = true; loadError = null
                 try {
                     val apartments = loadViewportApartments(visible)
-                    val layer = current.labelManager?.getLayer("actual-trades") ?: error("지도 단지 레이어가 없습니다.")
-                    val manager = current.labelManager ?: error("지도 스타일 관리자가 없습니다.")
-                    // Scale actual pixels explicitly: the SDK's tiny unscaled text was
-                    // unreadable on high-density phones. Reuse ONE blue background/style.
-                    val density = context.resources.displayMetrics.density
-                    val fontScale = context.resources.configuration.fontScale.coerceIn(1f, 1.2f)
-                    val styleId = "trade-blue-card-$density-$fontScale"
-                    val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
-                        blueTradeCardStyle(styleId, density, fontScale))
-                    val namePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = 13f * density * fontScale
-                    }
-                    coroutineContext.ensureActive()
-                    layer.removeAll()
-                    apartments.forEachIndexed { i, apt ->
-                        layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
-                            .setStyles(styles).setTexts(LabelTextBuilder()
-                                .addTextLine(TextUtils.ellipsize(apt.name, namePaint,
-                                    140f * density, TextUtils.TruncateAt.END).toString(), 0)
-                                .addTextLine(mapPrice(apt.latestPrice), 1)
-                                .addTextLine(apt.representativeArea?.let {
-                                    String.format(Locale.KOREA, "전용 %.1f평", it / 3.305785)
-                                } ?: "면적 미상", 2))
-                            .setClickable(true).setTag(apt))
-                        if (i % 40 == 0) yield()
-                    }
+                    apartmentsOnMap = apartments
                     count = apartments.size
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { loadError = "화면 단지 조회 실패: ${e.message}" }
                 finally { loading = false }
             }
+
+            // Rendering is separate from network access. Font controls redraw immediately;
+            // SDK zoom styles resize both the text and its background during map zoom.
+            LaunchedEffect(map, apartmentsOnMap, labelSizeStep, selected?.identity) {
+                val current = map ?: return@LaunchedEffect
+                val manager = current.labelManager ?: return@LaunchedEffect
+                val layer = manager.getLayer("actual-trades") ?: return@LaunchedEffect
+                val density = context.resources.displayMetrics.density
+                val fontScale = context.resources.configuration.fontScale.coerceIn(1f, 1.2f)
+                val userScale = 1f + labelSizeStep * 0.1f
+                val pricePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = 14f * density * fontScale * userScale
+                }
+                val areaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                    textSize = 12f * density * fontScale * userScale
+                }
+                layer.removeAll()
+                apartmentsOnMap.forEachIndexed { index, apt ->
+                    coroutineContext.ensureActive()
+                    val price = mapPrice(apt.latestPrice)
+                    val area = apt.representativeArea?.let {
+                        String.format(Locale.KOREA, "%.1f평", it / 3.305785)
+                    } ?: "면적 미상"
+                    val contentWidth = maxOf(pricePaint.measureText(price), areaPaint.measureText(area))
+                    // Share backgrounds by 4dp width buckets, with only a small text inset.
+                    val widthBucket = ceil((contentWidth / density + 12f * userScale) / 4f)
+                        .toInt().coerceAtLeast(12)
+                    val styleId = "compact-white-edge-$widthBucket-$density-$fontScale-$labelSizeStep"
+                    val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
+                        compactTradeStyles(styleId, widthBucket * 4f, density, fontScale, userScale))
+                    val priority = if (apt.identity == selected?.identity) Long.MAX_VALUE
+                        else apt.tradeCount.toLong() * 100000L + (apartmentsOnMap.size - index)
+                    layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
+                        .setStyles(styles)
+                        .setTexts(LabelTextBuilder().addTextLine(price, 0).addTextLine(area, 1))
+                        .setRank(priority).setClickable(true).setTag(apt))
+                    if (index % 40 == 0) yield()
+                }
+            }
             if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "실거래 단지 ${count}곳 · 가격·전용평수 · 누르면 상세",
+            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "조회 ${count}곳 · 전용평수 · 겹침 자동 정리 · 누르면 상세",
                 style = MaterialTheme.typography.bodySmall)
             val failure = mapError ?: positionError ?: loadError
             failure?.let {
@@ -234,28 +259,45 @@ fun KakaoApartmentMap(
     }
 }
 
-/** Opaque blue rectangle; white text is centered INSIDE the shared image. */
-private fun blueTradeCardStyle(id: String, density: Float, fontScale: Float): LabelStyles {
-    val width = (160f * density).roundToInt().coerceAtLeast(1)
-    val height = (86f * density).roundToInt().coerceAtLeast(1)
-    val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-        // Pixel dimensions are already density-scaled; prevent a second SDK scale.
-        this.density = Bitmap.DENSITY_NONE
-        eraseColor(Color.rgb(21, 101, 192))
+/**
+ * Content-sized, two-line cards. ZoomLevel styles are handled by the SDK without
+ * waiting for the viewport API; white border, blue fill, and fonts scale together.
+ */
+private fun compactTradeStyles(
+    id: String, baseWidthDp: Float, density: Float, fontScale: Float, userScale: Float
+): LabelStyles {
+    val levels = (0..21).map { zoom ->
+        zoom to (1f + (zoom - 15) * 0.06f).coerceIn(0.70f, 1.36f)
     }
-    val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.rgb(13, 71, 161)
-        style = Paint.Style.STROKE
-        strokeWidth = 2f * density
+    val styles = levels.map { (zoom, zoomScale) ->
+        val priceSize = 14f * density * fontScale * userScale * zoomScale
+        val areaSize = 12f * density * fontScale * userScale * zoomScale
+        val pricePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = priceSize }
+        val areaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = areaSize }
+        val width = (baseWidthDp * density * zoomScale).roundToInt().coerceAtLeast(1)
+        val height = ceil(pricePaint.fontSpacing + areaPaint.fontSpacing +
+            10f * density * userScale * zoomScale).toInt().coerceAtLeast(1)
+        val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            this.density = Bitmap.DENSITY_NONE
+        }
+        val canvas = Canvas(background)
+        val inset = (1.5f * density * userScale * zoomScale) / 2f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(21, 101, 192) }
+        val radius = 3f * density * userScale * zoomScale
+        canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, paint)
+        paint.color = Color.WHITE
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 1.5f * density * userScale * zoomScale
+        canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, paint)
+        LabelStyle.from(background)
+            .setApplyDpScale(false)
+            .setZoomLevel(zoom)
+            .setAnchorPoint(0.5f, 0.5f)
+            .setTextGravity(MapGravity.CENTER)
+            .setPadding(0f)
+            .setTextStyles(
+                LabelTextStyle.from(priceSize.roundToInt(), Color.WHITE),
+                LabelTextStyle.from(areaSize.roundToInt(), Color.WHITE))
     }
-    val inset = border.strokeWidth / 2f
-    Canvas(background).drawRect(inset, inset, width - inset, height - inset, border)
-    fun whiteText(size: Float) =
-        LabelTextStyle.from((size * density * fontScale).roundToInt(), Color.WHITE)
-    return LabelStyles.from(id, LabelStyle.from(background)
-        .setApplyDpScale(false)
-        .setAnchorPoint(0.5f, 0.5f)
-        .setTextGravity(MapGravity.CENTER)
-        .setPadding(0f)
-        .setTextStyles(whiteText(13f), whiteText(18f), whiteText(15f)))
+    return LabelStyles.from(id, *styles.toTypedArray())
 }
