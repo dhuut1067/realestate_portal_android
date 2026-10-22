@@ -27,9 +27,6 @@ import com.kakao.vectormap.label.OrderingType
 import com.kakao.vectormap.label.CompetitionType
 import com.kakao.vectormap.label.LabelLayerOptions
 import com.kakao.vectormap.label.LabelStyle
-import com.kakao.vectormap.label.LabelStyles
-import com.kakao.vectormap.label.LabelTextBuilder
-import com.kakao.vectormap.label.LabelTextStyle
 import com.kakao.vectormap.label.LabelOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +36,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.util.Locale
 import kotlin.math.roundToInt
-import kotlin.math.ceil
 
 private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
 
@@ -74,6 +70,7 @@ fun KakaoApartmentMap(
     var loading by remember { mutableStateOf(false) }
     var count by remember { mutableIntStateOf(0) }
     var apartmentsOnMap by remember { mutableStateOf<List<ServerApartment>>(emptyList()) }
+    var labelZoom by remember { mutableIntStateOf(15) }
     var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
@@ -100,7 +97,7 @@ fun KakaoApartmentMap(
                 var active = true
                 fun publishBounds(current: KakaoMap) {
                     view.post {
-                        if (active) bounds = viewportBounds(current)
+                        if (active) { labelZoom = current.zoomLevel; bounds = viewportBounds(current) }
                     }
                 }
                 val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -211,20 +208,16 @@ fun KakaoApartmentMap(
             }
 
             // Rendering is separate from network access. Font controls redraw immediately;
-            // SDK zoom styles resize both the text and its background during map zoom.
-            LaunchedEffect(map, apartmentsOnMap, labelSizeStep, selected?.identity) {
+            // Redraw each opaque card at the active zoom size.
+            LaunchedEffect(map, apartmentsOnMap, labelSizeStep, labelZoom, selected?.identity) {
                 val current = map ?: return@LaunchedEffect
                 val manager = current.labelManager ?: return@LaunchedEffect
                 val layer = manager.getLayer("actual-trades") ?: return@LaunchedEffect
                 val density = context.resources.displayMetrics.density
                 val fontScale = context.resources.configuration.fontScale.coerceIn(1f, 1.2f)
                 val userScale = 1f + labelSizeStep * 0.1f
-                val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                    textSize = 11f * density * fontScale * userScale
-                }
-                val styleId = "uniform-card-$density-$fontScale-$labelSizeStep"
-                val styles = manager.getLabelStyles(styleId) ?: manager.addLabelStyles(
-                    compactTradeStyles(styleId, 132f * fontScale * userScale, density, fontScale, userScale))
+                val zoomScale = (1f + (labelZoom - 15) * 0.06f).coerceIn(0.70f, 1.36f)
+                val scale = density * fontScale * userScale * zoomScale
                 layer.removeAll()
                 apartmentsOnMap.forEachIndexed { index, apt ->
                     coroutineContext.ensureActive()
@@ -232,13 +225,11 @@ fun KakaoApartmentMap(
                     val area = apt.representativeArea?.let {
                         String.format(Locale.KOREA, "%.1f평", it / 3.305785)
                     } ?: "면적 미상"
-                    val name = TextUtils.ellipsize(apt.name, textPaint,
-                        120f * density * fontScale * userScale, TextUtils.TruncateAt.END).toString()
+                    val card = opaqueTradeCard(apt.name, "$area · $price", scale)
                     val priority = if (apt.identity == selected?.identity) Long.MAX_VALUE
                         else apt.tradeCount.toLong() * 100000L + (apartmentsOnMap.size - index)
                     layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
-                        .setStyles(styles)
-                        .setTexts(LabelTextBuilder().addTextLine(name, 0).addTextLine("$area · $price", 1))
+                        .setStyles(LabelStyle.from(card).setApplyDpScale(false).setAnchorPoint(0.5f, 0.5f))
                         .setRank(priority).setClickable(true).setTag(apt))
                     if (index % 40 == 0) yield()
                 }
@@ -256,44 +247,35 @@ fun KakaoApartmentMap(
 }
 
 /**
- * Content-sized, two-line cards. ZoomLevel styles are handled by the SDK without
- * waiting for the viewport API; white border, blue fill, and fonts scale together.
+ * Text and background are ONE opaque bitmap, so SDK icon/text passes cannot
+ * paint a rear label's text over the front label's blue background.
+ * Generate only the active zoom size instead of retaining 22 images per label.
  */
-private fun compactTradeStyles(
-    id: String, baseWidthDp: Float, density: Float, fontScale: Float, userScale: Float
-): LabelStyles {
-    val levels = (0..21).map { zoom ->
-        zoom to (1f + (zoom - 15) * 0.06f).coerceIn(0.70f, 1.36f)
+private fun opaqueTradeCard(name: String, details: String, scale: Float): Bitmap {
+    val width = (132f * scale).roundToInt().coerceAtLeast(1)
+    val height = (40f * scale).roundToInt().coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+        density = Bitmap.DENSITY_NONE
+        eraseColor(Color.rgb(21, 101, 192))
     }
-    val styles = levels.map { (zoom, zoomScale) ->
-        val priceSize = 11f * density * fontScale * userScale * zoomScale
-        val areaSize = 11f * density * fontScale * userScale * zoomScale
-        val pricePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = priceSize }
-        val areaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = areaSize }
-        val width = (baseWidthDp * density * zoomScale).roundToInt().coerceAtLeast(1)
-        val height = ceil(pricePaint.fontSpacing + areaPaint.fontSpacing +
-            10f * density * userScale * zoomScale).toInt().coerceAtLeast(1)
-        val background = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
-            this.density = Bitmap.DENSITY_NONE
-        }
-        val canvas = Canvas(background)
-        val inset = (1.5f * density * userScale * zoomScale) / 2f
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(21, 101, 192) }
-        val radius = 3f * density * userScale * zoomScale
-        canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, paint)
-        paint.color = Color.WHITE
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1.5f * density * userScale * zoomScale
-        canvas.drawRoundRect(inset, inset, width - inset, height - inset, radius, radius, paint)
-        LabelStyle.from(background)
-            .setApplyDpScale(false)
-            .setZoomLevel(zoom)
-            .setAnchorPoint(0.5f, 0.5f)
-            .setTextGravity(MapGravity.CENTER)
-            .setPadding(0f)
-            .setTextStyles(
-                LabelTextStyle.from(priceSize.roundToInt(), Color.WHITE),
-                LabelTextStyle.from(areaSize.roundToInt(), Color.WHITE))
+    val canvas = Canvas(bitmap)
+    val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        style = Paint.Style.STROKE
+        strokeWidth = 1.5f * scale
     }
-    return LabelStyles.from(id, *styles.toTypedArray())
+    val inset = border.strokeWidth / 2f
+    canvas.drawRect(inset, inset, width - inset, height - inset, border)
+    val text = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 11f * scale
+        textAlign = Paint.Align.CENTER
+    }
+    val maxWidth = (width - 12f * scale).coerceAtLeast(1f)
+    val title = TextUtils.ellipsize(name, text, maxWidth, TextUtils.TruncateAt.END).toString()
+    val second = TextUtils.ellipsize(details, text, maxWidth, TextUtils.TruncateAt.END).toString()
+    val centerOffset = -(text.ascent() + text.descent()) / 2f
+    canvas.drawText(title, width / 2f, height * 0.30f + centerOffset, text)
+    canvas.drawText(second, width / 2f, height * 0.70f + centerOffset, text)
+    return bitmap
 }
