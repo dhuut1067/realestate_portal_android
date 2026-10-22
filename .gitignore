@@ -41,3 +41,6 @@ captures/
 keystore.properties
 key.properties
 *-firebase-adminsdk-*.json
+
+# Local build reports
+build-diagnostics/

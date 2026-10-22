@@ -23,3 +23,11 @@ SDK/JBR 기본 경로 외에 설치한 경우 스크립트가 프로젝트의 `s
 - 지역 선택창은 로딩·오류·빈 목록을 표시하고 '다시 조회'를 제공합니다.
 
 자세한 동작과 확인 범위는 `MAP_VERSION.md`를 참고하십시오.
+
+## Windows 실행 환경과 오류 보고
+
+`run-map.ps1`은 Android Studio JBR의 java/javac/jlink와 API 36 SDK를 먼저 확인합니다.
+Gradle 캐시는 `%LOCALAPPDATA%\EstatePortalNative\gradle`로 고정하며, 실행 중인 PowerShell 프로세스에서 상속된 JVM/Gradle 옵션을 격리합니다. 시스템 환경변수는 변경하지 않습니다.
+`--no-daemon --stacktrace`로 빌드하고 전체 출력을 `build-diagnostics\last-build.log`에 저장합니다.
+실패하면 로그 끝에 Gradle의 `What went wrong`과 Kotlin 컴파일 오류를 다시 출력합니다.
+빌드 실패 시 이전 APK를 설치하지 않습니다. 빌드 성공과 기기 연결/설치 실패도 구분합니다.
