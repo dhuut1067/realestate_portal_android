@@ -1,16 +1,15 @@
 package kr.co.estate.portal
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
 import android.location.Geocoder
 import android.view.MotionEvent
+import android.view.View
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -18,38 +17,63 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kakao.vectormap.*
 import com.kakao.vectormap.camera.CameraUpdateFactory
+import com.kakao.vectormap.label.CompetitionType
+import com.kakao.vectormap.label.LabelLayerOptions
+import com.kakao.vectormap.label.LabelStyle
+import com.kakao.vectormap.label.LabelStyles
+import com.kakao.vectormap.label.LabelTextBuilder
+import com.kakao.vectormap.label.LabelTextStyle
 import com.kakao.vectormap.label.LabelOptions
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.util.Locale
 
-/** Native Kakao Map: no WebView. Region coordinates are never used as apartment coordinates. */
+private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
+
+// Use all four screen corners: also covers rotated maps. SDK 2.15.1 API.
+private fun viewportBounds(map: KakaoMap): MapBounds? {
+    val rect = map.viewport
+    if (rect.width() <= 0 || rect.height() <= 0) return null
+    val points = listOf(
+        map.fromScreenPoint(rect.left, rect.top), map.fromScreenPoint(rect.right - 1, rect.top),
+        map.fromScreenPoint(rect.left, rect.bottom - 1), map.fromScreenPoint(rect.right - 1, rect.bottom - 1)
+    )
+    if (points.any { it == null }) return null
+    val valid = points.filterNotNull()
+    return MapBounds(valid.minOf { it.longitude }, valid.minOf { it.latitude },
+        valid.maxOf { it.longitude }, valid.maxOf { it.latitude })
+}
+
 @Composable
 fun KakaoApartmentMap(
-    apartments: List<ServerApartment>,
-    selected: ServerApartment?,
-    region: String,
-    onSelect: (ServerApartment) -> Unit
+    selected: ServerApartment?, region: String, regionDepth: Int,
+    focusRequest: Int, mapHeight: Dp, onSelect: (ServerApartment) -> Unit
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val select by rememberUpdatedState(onSelect)
     var map by remember { mutableStateOf<KakaoMap?>(null) }
-    var status by remember { mutableStateOf("카카오 지도 연결 중…") }
-    var failure by remember { mutableStateOf<String?>(null) }
+    var bounds by remember { mutableStateOf<MapBounds?>(null) }
+    var mapError by remember { mutableStateOf<String?>(null) }
+    var positionError by remember { mutableStateOf<String?>(null) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var positionLoading by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var count by remember { mutableIntStateOf(0) }
+    var retry by remember { mutableIntStateOf(0) }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
-
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("지도에서 단지 선택", style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("실거래 지도", style = MaterialTheme.typography.titleMedium)
         if (appKey.isBlank()) {
-            Text("카카오 네이티브 앱 키가 없습니다. local.properties에 KAKAO_NATIVE_APP_KEY를 입력한 뒤 다시 실행하십시오.",
-                color = MaterialTheme.colorScheme.error)
+            Text("카카오 네이티브 앱 키가 없습니다.", color = MaterialTheme.colorScheme.error)
         } else {
-            val view = remember(context) {
+            val view = remember(context, appKey) {
                 KakaoMapSdk.init(context.applicationContext, appKey)
                 MapView(context).apply {
-                    // Let map gestures win over the enclosing search form's vertical scroll.
                     setOnTouchListener { v, event ->
                         v.parent?.requestDisallowInterceptTouchEvent(
                             event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL)
@@ -59,6 +83,15 @@ fun KakaoApartmentMap(
             }
             DisposableEffect(view, owner) {
                 var active = true
+                fun publishBounds(current: KakaoMap) {
+                    view.post {
+                        if (active) bounds = viewportBounds(current)
+                    }
+                }
+                val layoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                    map?.let(::publishBounds)
+                }
+                view.addOnLayoutChangeListener(layoutListener)
                 val observer = LifecycleEventObserver { _, event ->
                     when (event) {
                         Lifecycle.Event.ON_RESUME -> view.resume()
@@ -70,95 +103,124 @@ fun KakaoApartmentMap(
                 view.start(object : MapLifeCycleCallback() {
                     override fun onMapDestroy() {}
                     override fun onMapError(error: Exception) {
-                        view.post { if (active) failure = "지도 인증/연결 실패: ${error.message}" }
+                        view.post { if (active) mapError = "지도 연결 실패: ${error.message}" }
                     }
                 }, object : KakaoMapReadyCallback() {
-                    override fun getPosition(): LatLng = LatLng.from(35.1796, 129.0756)
-                    override fun getZoomLevel(): Int = 12
-                    override fun onMapReady(kakaoMap: KakaoMap) {
-                        kakaoMap.setOnLabelClickListener { _, _, label ->
+                    override fun getPosition(): LatLng = SEOUL_CITY_HALL
+                    override fun getZoomLevel(): Int = 15
+                    override fun onMapReady(current: KakaoMap) {
+                        current.labelManager?.addLayer(LabelLayerOptions.from("actual-trades")
+                            .setCompetitionType(CompetitionType.None).setClickable(true))
+                        current.setOnLabelClickListener { _, _, label ->
                             val apartment = label.tag as? ServerApartment
                             view.post { if (active && apartment != null) select(apartment) }
                             true
                         }
+                        current.setOnCameraMoveStartListener { _, _ ->
+                            // Invalidate pending network results as soon as the camera moves.
+                            view.post { if (active) bounds = null }
+                        }
+                        current.setOnCameraMoveEndListener { k, _, _ -> publishBounds(k) }
                         view.post {
-                            if (active) {
-                                map = kakaoMap
-                                status = "지도를 움직이거나 지역·단지를 선택하십시오."
-                            }
+                            if (active) { map = current; mapError = null; publishBounds(current) }
                         }
                     }
                 })
                 if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) view.resume()
                 onDispose {
                     active = false
+                    view.removeOnLayoutChangeListener(layoutListener)
                     owner.lifecycle.removeObserver(observer)
-                    map = null
-                    view.pause()
-                    view.finish()
+                    map = null; bounds = null
+                    view.pause(); view.finish()
                 }
             }
-            AndroidView(factory = { view }, modifier = Modifier.fillMaxWidth().height(300.dp))
+            AndroidView(factory = { view }, modifier = Modifier.fillMaxWidth().height(mapHeight))
 
-            LaunchedEffect(map, apartments, selected, region) {
+            // This effect ONLY moves the camera. Loading results never moves it back.
+            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest) {
                 val current = map ?: return@LaunchedEffect
-                val layer = current.labelManager?.layer ?: return@LaunchedEffect
-                layer.removeAll()
-                failure = null
+                positionError = null; positionLoading = true
                 try {
-                    // Prefer server coordinates. Geocoder is a fallback only for the selected apartment.
-                    val points = apartments.mapNotNull { apt ->
-                        apt.latitude?.let { lat -> apt.longitude?.let { lng -> apt to LatLng.from(lat, lng) } }
-                    }.toMutableList()
-                    if (selected != null && points.none { it.first.kaptCode == selected.kaptCode }) {
-                        status = "${selected.name} 위치 조회 중…"
-                        val position = withContext(Dispatchers.IO) {
-                            @Suppress("DEPRECATION")
-                            val addresses = Geocoder(context, Locale.KOREA)
-                                .getFromLocationName("$region ${selected.name}", 1)
-                            addresses?.firstOrNull()?.let { LatLng.from(it.latitude, it.longitude) }
+                    val point: LatLng
+                    val zoom: Int
+                    if (selected != null) {
+                        val resolved = resolveApartment(selected)
+                        point = if (resolved.latitude != null && resolved.longitude != null) {
+                            LatLng.from(resolved.latitude, resolved.longitude)
+                        } else {
+                            withContext(Dispatchers.IO) {
+                                @Suppress("DEPRECATION")
+                                val address = Geocoder(context, Locale.KOREA)
+                                    .getFromLocationName("$region ${selected.name}", 1)?.firstOrNull()
+                                    ?: error("선택 단지의 좌표를 찾지 못했습니다.")
+                                LatLng.from(address.latitude, address.longitude)
+                            }
                         }
-                        if (position != null) points.add(selected to position)
-                        else failure = "${selected.name}의 좌표를 찾지 못했습니다. 단지 검색 버튼으로 상세정보를 열 수 있습니다."
-                    }
-                    points.forEach { (apt, position) ->
-                        layer.addLabel(LabelOptions.from(apt.kaptCode, position)
-                            .setStyles(apartmentMarker(apt.name))
-                            .setClickable(true).setTag(apt))
-                    }
-                    val focus = points.firstOrNull { it.first.kaptCode == selected?.kaptCode } ?: points.firstOrNull()
-                    if (focus != null) current.moveCamera(CameraUpdateFactory.newCenterPosition(focus.second, 15))
-                    else if (selected == null && region.isNotBlank()) {
-                        val center = withContext(Dispatchers.IO) {
+                        zoom = 17
+                    } else if (regionDepth == 1 && (region == "서울특별시" || region.isBlank())) {
+                        point = SEOUL_CITY_HALL; zoom = 15
+                    } else {
+                        point = withContext(Dispatchers.IO) {
                             @Suppress("DEPRECATION")
-                            val addresses = Geocoder(context, Locale.KOREA).getFromLocationName(region, 1)
-                            addresses?.firstOrNull()?.let { LatLng.from(it.latitude, it.longitude) }
+                            val address = Geocoder(context, Locale.KOREA).getFromLocationName(region, 1)?.firstOrNull()
+                                ?: error("$region 중심 좌표를 찾지 못했습니다.")
+                            LatLng.from(address.latitude, address.longitude)
                         }
-                        if (center != null) current.moveCamera(CameraUpdateFactory.newCenterPosition(center, 14))
+                        zoom = if (regionDepth >= 3) 16 else if (regionDepth == 2) 14 else 12
                     }
-                    status = if (points.isEmpty()) "단지를 선택하면 위치를 표시합니다."
-                        else "단지 ${points.size}곳 표시 · 이름표를 누르면 실거래 화면이 열립니다."
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    failure = "단지 위치 조회 실패: ${e.message}"
-                }
+                    bounds = null
+                    current.moveCamera(CameraUpdateFactory.newCenterPosition(point, zoom))
+                    // Explicit refresh also covers selecting an already centered location.
+                    view.post { if (map === current) bounds = viewportBounds(current) }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { positionError = "위치 이동 실패: ${e.message}" }
+                finally { positionLoading = false }
             }
-            Text(failure ?: status, style = MaterialTheme.typography.bodySmall,
-                color = if (failure != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
-        }
-    }
-}
 
-private fun apartmentMarker(name: String): Bitmap {
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 30f; isFakeBoldText = true }
-    val title = name.take(22)
-    val width = (paint.measureText(title) + 36).toInt()
-    return Bitmap.createBitmap(width, 58, Bitmap.Config.ARGB_8888).also { bitmap ->
-        val canvas = Canvas(bitmap)
-        paint.color = Color.rgb(8, 127, 104)
-        canvas.drawRoundRect(0f, 0f, width.toFloat(), 58f, 14f, 14f, paint)
-        paint.color = Color.WHITE
-        canvas.drawText(title, 18f, 39f, paint)
+            LaunchedEffect(map, bounds, retry) {
+                val current = map ?: return@LaunchedEffect
+                val visible = bounds ?: return@LaunchedEffect
+                delay(350) // Coalesce rapid gestures; cancellation discards stale responses.
+                loading = true; loadError = null
+                try {
+                    val apartments = loadViewportApartments(visible)
+                    val layer = current.labelManager?.getLayer("actual-trades") ?: error("지도 단지 레이어가 없습니다.")
+                    val manager = current.labelManager ?: error("지도 스타일 관리자가 없습니다.")
+                    // One shared native text style for every complex: no separate bitmap
+                    // texture per apartment, even when thousands are visible.
+                    val styles = manager.getLabelStyles("trade-price-area") ?: manager.addLabelStyles(
+                        LabelStyles.from("trade-price-area", LabelStyle.from(
+                            LabelTextStyle.from(12, Color.rgb(8, 127, 104), 2, Color.WHITE),
+                            LabelTextStyle.from(14, Color.BLACK, 2, Color.WHITE),
+                            LabelTextStyle.from(12, Color.DKGRAY, 2, Color.WHITE)
+                        )))
+                    coroutineContext.ensureActive()
+                    layer.removeAll()
+                    apartments.forEachIndexed { i, apt ->
+                        layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
+                            .setStyles(styles).setTexts(LabelTextBuilder()
+                                .addTextLine(apt.name, 0)
+                                .addTextLine(mapPrice(apt.latestPrice), 1)
+                                .addTextLine(apt.representativeArea?.let {
+                                    String.format(Locale.KOREA, "전용 %.1f평", it / 3.305785)
+                                } ?: "면적 미상", 2))
+                            .setClickable(true).setTag(apt))
+                        if (i % 40 == 0) yield()
+                    }
+                    count = apartments.size
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { loadError = "화면 단지 조회 실패: ${e.message}" }
+                finally { loading = false }
+            }
+            if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "실거래 단지 ${count}곳 · 가격·전용평수 · 누르면 상세",
+                style = MaterialTheme.typography.bodySmall)
+            val failure = mapError ?: positionError ?: loadError
+            failure?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { retry++ }, enabled = !loading) { Text("현재 화면 다시 조회") }
+            }
+        }
     }
 }

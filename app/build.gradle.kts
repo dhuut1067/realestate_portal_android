@@ -21,8 +21,8 @@ android {
         minSdk = 24
         targetSdk = 36
         buildConfigField("String", "KAKAO_NATIVE_APP_KEY", "\"$kakaoKey\"")
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "10-20-02"
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions {
@@ -32,6 +32,8 @@ android {
     kotlinOptions { jvmTarget = "17" }
 }
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     implementation("com.kakao.maps.open:android:2.15.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))

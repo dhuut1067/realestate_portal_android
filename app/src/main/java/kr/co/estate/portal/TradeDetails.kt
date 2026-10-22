@@ -36,8 +36,10 @@ private fun moneyLabel(amount: Double?): String {
     else "${String.format(Locale.KOREA, "%,d", n)}만"
 }
 private fun areaKey(area: Double?) = area?.let { String.format(Locale.US, "%.1f", it) } ?: "미상"
-private suspend fun loadActualTrades(base: String, code: String): TradeResponse = withContext(Dispatchers.IO) {
-    val c = URL("${base.trimEnd('/')}/api/apartment-v2-detail/?kapt_code=${URLEncoder.encode(code, "UTF-8")}&years=3&limit=500").openConnection() as HttpURLConnection
+private suspend fun loadActualTrades(base: String, apt: ServerApartment): TradeResponse = withContext(Dispatchers.IO) {
+    val identity = if (apt.kaptCode.isNotBlank()) "kapt_code=${encoded(apt.kaptCode)}"
+        else "sgg_cd=${encoded(apt.bjdCode.take(5))}&dong_name=${encoded(apt.dong)}&apt_name=${encoded(apt.name)}"
+    val c = URL("${base.trimEnd('/')}/api/apartment-v2-detail/?$identity&years=3&limit=500").openConnection() as HttpURLConnection
     try {
         c.connectTimeout = 10000; c.readTimeout = 30000
         c.setRequestProperty("Accept", "application/json")
@@ -63,16 +65,16 @@ private suspend fun loadActualTrades(base: String, code: String): TradeResponse 
 
 @Composable
 fun ServerApartmentDetail(apt: ServerApartment) {
-    var data by remember(apt.kaptCode) { mutableStateOf<TradeResponse?>(null) }
-    var loading by remember(apt.kaptCode) { mutableStateOf(true) }
-    var failure by remember(apt.kaptCode) { mutableStateOf<String?>(null) }
-    var retry by remember(apt.kaptCode) { mutableIntStateOf(0) }
-    var years by remember(apt.kaptCode) { mutableIntStateOf(3) }
-    var area by remember(apt.kaptCode) { mutableStateOf("전체") }
-    var tab by remember(apt.kaptCode) { mutableIntStateOf(0) }
-    LaunchedEffect(apt.kaptCode, retry) {
+    var data by remember(apt.identity) { mutableStateOf<TradeResponse?>(null) }
+    var loading by remember(apt.identity) { mutableStateOf(true) }
+    var failure by remember(apt.identity) { mutableStateOf<String?>(null) }
+    var retry by remember(apt.identity) { mutableIntStateOf(0) }
+    var years by remember(apt.identity) { mutableIntStateOf(3) }
+    var area by remember(apt.identity) { mutableStateOf("전체") }
+    var tab by remember(apt.identity) { mutableIntStateOf(0) }
+    LaunchedEffect(apt.identity, retry) {
         loading = true; failure = null
-        try { data = loadActualTrades(DJANGO_BASE_URL, apt.kaptCode) }
+        try { data = loadActualTrades(DJANGO_BASE_URL, apt) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { failure = e.message ?: "실거래 조회 실패" }
         finally { loading = false }
