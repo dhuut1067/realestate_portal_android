@@ -17,7 +17,11 @@ function Invoke-LoggedNative([string]$Executable, [string[]]$Arguments) {
     $previousPreference = $ErrorActionPreference
     try {
         $ErrorActionPreference = 'Continue'
-        & $Executable @Arguments 2>&1 | ForEach-Object { Write-Report $_.ToString() }
+        & $Executable @Arguments 2>&1 | ForEach-Object {
+            $line = $_.ToString()
+            if ($line -eq 'System.Management.Automation.RemoteException') { $line = '' }
+            Write-Report $line
+        }
         $nativeExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
     return $nativeExit
@@ -61,14 +65,54 @@ try {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
 
-    $javaCandidates = @((Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'), $oldSettings['JAVA_HOME'])
+    # Gradle 8.14.5 cannot run this Kotlin DSL on Java 25. Use the exact
+    # Java major version used for the successful APK build, not the IDE's JBR.
+    $jdkRoot = Join-Path $env:LOCALAPPDATA 'EstatePortalNative\jdk17'
+    function Test-Jdk17([string]$Candidate) {
+        if (-not $Candidate) { return $false }
+        $releaseFile = Join-Path $Candidate 'release'
+        if (-not (Test-Path $releaseFile)) { return $false }
+        $release = [IO.File]::ReadAllText($releaseFile)
+        return ($release -match '(?m)^JAVA_VERSION="17(?:\.|"|-)') -and
+            (Test-Path (Join-Path $Candidate 'bin\java.exe')) -and
+            (Test-Path (Join-Path $Candidate 'bin\javac.exe')) -and
+            (Test-Path (Join-Path $Candidate 'bin\jlink.exe'))
+    }
+    $javaCandidates = @($oldSettings['JAVA_HOME'], (Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'))
+    foreach ($root in @($jdkRoot, (Join-Path $env:ProgramFiles 'Microsoft'),
+        (Join-Path $env:ProgramFiles 'Eclipse Adoptium'), (Join-Path $env:ProgramFiles 'Java'),
+        (Join-Path $env:USERPROFILE '.jdks'), (Join-Path $env:USERPROFILE '.gradle\jdks'))) {
+        if (Test-Path $root) {
+            $javaCandidates += @(Get-ChildItem -LiteralPath $root -Directory | ForEach-Object { $_.FullName })
+        }
+    }
     $javaHome = $null
     foreach ($candidate in $javaCandidates) {
-        if ($candidate -and (Test-Path (Join-Path $candidate 'bin\java.exe')) -and
-            (Test-Path (Join-Path $candidate 'bin\javac.exe')) -and
-            (Test-Path (Join-Path $candidate 'bin\jlink.exe'))) { $javaHome = $candidate; break }
+        if (Test-Jdk17 $candidate) { $javaHome = $candidate; break }
     }
-    if (-not $javaHome) { throw 'A complete Android Studio JBR/JDK (java, javac, jlink) was not found.' }
+    if (-not $javaHome) {
+        Write-Report 'Compatible JDK 17 not found. Preparing portable Microsoft OpenJDK 17 (about 180 MB)...'
+        New-Item -ItemType Directory -Force -Path $jdkRoot | Out-Null
+        $archive = Join-Path $jdkRoot 'microsoft-jdk-17.zip'
+        $download = $archive + '.download'
+        $progress = $ProgressPreference
+        $tls = [Net.ServicePointManager]::SecurityProtocol
+        try {
+            $ProgressPreference = 'SilentlyContinue'
+            [Net.ServicePointManager]::SecurityProtocol = $tls -bor [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -UseBasicParsing -Uri 'https://aka.ms/download-jdk/microsoft-jdk-17.0.20.1-windows-x64.zip' -OutFile $download
+            Move-Item -LiteralPath $download -Destination $archive -Force
+            Expand-Archive -LiteralPath $archive -DestinationPath $jdkRoot -Force
+        } finally {
+            $ProgressPreference = $progress
+            [Net.ServicePointManager]::SecurityProtocol = $tls
+        }
+        foreach ($folder in @(Get-ChildItem -LiteralPath $jdkRoot -Directory)) {
+            if (Test-Jdk17 $folder.FullName) { $javaHome = $folder.FullName; break }
+        }
+        if (-not $javaHome) { throw 'The downloaded archive did not contain a complete JDK 17.' }
+        Write-Report 'Portable JDK 17 prepared. Android Studio and system Java settings were not changed.'
+    }
     $javaExe = Join-Path $javaHome 'bin\java.exe'
     $env:JAVA_HOME = $javaHome
     Write-Report ('Java: ' + $javaHome)
