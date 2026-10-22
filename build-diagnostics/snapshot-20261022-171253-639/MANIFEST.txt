@@ -1,0 +1,21 @@
+Captured: 2026-10-22 17:12:53
+Project: C:\Users\82104\AndroidStudioProjects\EstatePortalNative
+Diagnostic branch: diagnostics/build-20261022-171253-639
+Files are copied in full, without tail/truncation.
+previous-last-build.log | SHA256=E262876F0B11FC6A9898E762675BA999DBCC460FC177CE8EBE79B9F8D0C24054 | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\build-diagnostics\last-build.log
+previous-daemon-0.log | SHA256=7937E23DB26B9EC91645CA56329EF07269DE79CA1875C3A9124E36523CA687C0 | source=C:\Users\82104\.gradle\daemon\8.14.5\daemon-30412.out.log
+previous-daemon-1.log | SHA256=C0DCED000A09507784A2D7CCD10D472A94310BB3C1C35502E35F2AB2B1618A6D | source=C:\Users\82104\.gradle\daemon\8.14.5\daemon-23100.out.log
+previous-daemon-2.log | SHA256=AE0768269E15C1D75EA053080A55E499509EF605A0C2264F616D0AADE4694F74 | source=C:\Users\82104\.gradle\daemon\8.14.5\daemon-704.out.log
+previous-daemon-3.log | SHA256=E4D652AF160C96AAAA39D97CBDA07E9B90042E3734DB3544FB8895344E1A2B26 | source=C:\Users\82104\AppData\Local\EstatePortalNative\gradle\daemon\8.14.5\daemon-29068.out.log
+previous-daemon-4.log | SHA256=F1C0074C29C28BF3F7E9C0E95B21AE2CAACE67715113ECB17ED98B19169AE8A4 | source=C:\Users\82104\AppData\Local\EstatePortalNative\gradle\daemon\8.14.5\daemon-26404.out.log
+previous-daemon-5.log | SHA256=3DFD374ACBC57343F2B021571C5AEB541A223BE1470F975BAC5698380B9605D2 | source=C:\Users\82104\AppData\Local\EstatePortalNative\gradle\daemon\8.14.5\daemon-22432.out.log
+Not present: C:\Users\82104\AndroidStudioProjects\EstatePortalNative\build-error.txt
+Not present: C:\Users\82104\AndroidStudioProjects\EstatePortalNative\build.log
+Not present: C:\Users\82104\AndroidStudioProjects\EstatePortalNative\gradle-build.log
+local.properties | SHA256=33DE65F83D970A7CD633B1B193E462445F4CE4F68313CD41B83E5478CB141242 | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\local.properties
+gradle.properties | SHA256=A74247BBE3312C9702FE0DCEF373262CD361AF1B57BF5711553D2C0EA7F0B24A | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\gradle.properties
+app-build.gradle.kts | SHA256=5B179471CE59FD145D32035A147323D98F1BE7438A181702D8FE04F27F07A51D | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\app\build.gradle.kts
+gradle-wrapper-gradle-wrapper.properties | SHA256=4489F01D0FBF656FA54EA9D4A8E354A00CE1D92C98356A000302237EC839B1A6 | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\gradle\wrapper\gradle-wrapper.properties
+run-map.ps1 | SHA256=3560C6D30540759A42FEDF9DC27337AEE23FFBA9AAA6A89F2A381550DB2C5C76 | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\run-map.ps1
+Fresh build/install/launch exit code: 0
+current-last-build.log | SHA256=4D7C3B724800558C020ADB3B1E716CB7CEC2F6125DC7E38F66B72FF0F917E691 | source=C:\Users\82104\AndroidStudioProjects\EstatePortalNative\build-diagnostics\last-build.log
