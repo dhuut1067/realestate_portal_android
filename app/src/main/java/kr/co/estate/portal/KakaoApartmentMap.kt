@@ -26,6 +26,8 @@ import com.kakao.vectormap.label.CompetitionUnit
 import com.kakao.vectormap.label.OrderingType
 import com.kakao.vectormap.label.CompetitionType
 import com.kakao.vectormap.label.LabelLayerOptions
+import com.kakao.vectormap.label.LabelTransition
+import com.kakao.vectormap.label.Transition
 import com.kakao.vectormap.label.LabelStyle
 import com.kakao.vectormap.label.LabelOptions
 import kotlinx.coroutines.CancellationException
@@ -229,7 +231,12 @@ fun KakaoApartmentMap(
                     val priority = if (apt.identity == selected?.identity) Long.MAX_VALUE
                         else apt.tradeCount.toLong() * 100000L + (apartmentsOnMap.size - index)
                     layer.addLabel(LabelOptions.from(apt.identity, LatLng.from(apt.latitude!!, apt.longitude!!))
-                        .setStyles(LabelStyle.from(card).setApplyDpScale(false).setAnchorPoint(0.5f, 0.5f))
+                        .setStyles(LabelStyle.from(card)
+                            .setApplyDpScale(false).setAnchorPoint(0.5f, 0.5f)
+                            .setIconTransition(LabelTransition.from(Transition.None, Transition.None)
+                                .enableTransitionWhenChange(false, false))
+                            .setTextTransition(LabelTransition.from(Transition.None, Transition.None)
+                                .enableTransitionWhenChange(false, false)))
                         .setRank(priority).setClickable(true).setTag(apt))
                     if (index % 40 == 0) yield()
                 }
@@ -257,6 +264,7 @@ private fun opaqueTradeCard(name: String, details: String, scale: Float): Bitmap
     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
         density = Bitmap.DENSITY_NONE
         eraseColor(Color.rgb(21, 101, 192))
+        setHasAlpha(false) // Every pixel is opaque; never use a transparent icon surface.
     }
     val canvas = Canvas(bitmap)
     val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
