@@ -12,7 +12,7 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.Locale
 
-internal const val DJANGO_BASE_URL = "http://cncvision.ipdisk.co.kr:8001"
+internal const val DJANGO_BASE_URL = "https://ulidongne.com"
 internal fun encoded(value: String): String = URLEncoder.encode(value, "UTF-8")
 
 data class ServerApartment(
