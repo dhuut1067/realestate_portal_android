@@ -42,3 +42,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run-map.ps1
 `assembleDebug` APK 빌드 성공. `testDebugUnitTest` 4개 통과(실패/오류 0).
 서울시청 주변 검증 범위에서 실거래 단지 25개와 가격/면적/범위 일치를 확인했습니다.
 휴대폰에서 최종 지도 렌더링, 지역 선택 후 이동 및 라벨 클릭은 설치 후 확인해야 합니다.
+
+## 2026-10-25 — ulidongne.com HTTPS 연결 확인
+
+- 공통 API 주소: `https://ulidongne.com` (별도 포트번호 없음).
+- 주소 변경 커밋: `59516ae9c64b0fddd8ac77ca88cc094fcaa55264`.
+- 사용자 제공 빌드 화면에서 `BUILD SUCCESSFUL`, 무선 기기 설치 `Success`, 앱 시작 `Status: ok`를 확인했습니다.
+- 사용자가 휴대폰 앱의 정상 동작을 확인했습니다. 모든 화면에 대한 별도 회귀 시험을 의미하지 않습니다.
+- 문현동 Nginx에서 연화리 Django `100.121.133.127:8001`로 연결하며, 일반 사용자와 `www-data` 계정의 직접 연결 모두 HTTP 200 응답을 확인했습니다.
+- 이 기록은 GitHub 소스 기준입니다. PC의 미커밋 파일 및 APK를 새로 업로드한 것은 아닙니다.
