@@ -117,8 +117,8 @@ internal suspend fun loadViewportApartments(
         } else {
             for (i in 0 until rows.length()) {
                 val apartment = rows.optJSONObject(i)?.let(::parseApartment) ?: continue
-                // Show the same real trade summary as the web. Never invent a price.
-                if (apartment.latitude != null && apartment.longitude != null && apartment.latestPrice != null) {
+                // Include all geocoded complexes; no-price complexes get a clear unavailable label.
+                if (apartment.latitude != null && apartment.longitude != null) {
                     apartments[apartment.identity] = apartment
                 }
             }
