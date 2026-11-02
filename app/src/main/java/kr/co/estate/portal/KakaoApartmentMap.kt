@@ -51,6 +51,38 @@ import kotlin.math.roundToInt
 
 private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
 
+// Approximate geographic envelopes used to fit a whole province/city on screen.
+// These are VIEW extents, not legal administrative boundary polygons.
+private val sidoViewExtents: Map<String, MapBounds> = mapOf(
+    "서울특별시" to MapBounds(126.75, 37.40, 127.22, 37.73),
+    "부산광역시" to MapBounds(128.75, 34.85, 129.38, 35.41),
+    "대구광역시" to MapBounds(128.34, 35.59, 128.83, 36.04),
+    "인천광역시" to MapBounds(124.60, 36.85, 126.83, 38.10),
+    "광주광역시" to MapBounds(126.63, 35.03, 127.02, 35.27),
+    "대전광역시" to MapBounds(127.24, 36.18, 127.57, 36.50),
+    "울산광역시" to MapBounds(128.97, 35.32, 129.48, 35.75),
+    "세종특별자치시" to MapBounds(127.08, 36.42, 127.40, 36.75),
+    "경기도" to MapBounds(126.37, 36.88, 127.91, 38.33),
+    "강원특별자치도" to MapBounds(127.08, 37.03, 129.38, 38.64),
+    "강원도" to MapBounds(127.08, 37.03, 129.38, 38.64),
+    "충청북도" to MapBounds(127.26, 36.00, 128.66, 37.26),
+    "충청남도" to MapBounds(125.94, 35.96, 127.64, 37.10),
+    "전북특별자치도" to MapBounds(126.40, 35.28, 127.94, 36.15),
+    "전라북도" to MapBounds(126.40, 35.28, 127.94, 36.15),
+    "전라남도" to MapBounds(125.99, 33.88, 127.88, 35.50),
+    "경상북도" to MapBounds(128.06, 35.55, 131.90, 37.56),
+    "경상남도" to MapBounds(127.55, 34.57, 129.23, 35.97),
+    "제주특별자치도" to MapBounds(126.14, 33.10, 126.98, 33.62)
+)
+private fun fitSidoView(current: KakaoMap, bounds: MapBounds, density: Float) {
+    val corners = arrayOf(
+        LatLng.from(bounds.south, bounds.west),
+        LatLng.from(bounds.north, bounds.east)
+    )
+    current.moveCamera(CameraUpdateFactory.fitMapPoints(corners, (12f * density).toInt(), 13))
+}
+
+
 // Use all four screen corners: also covers rotated maps. SDK 2.15.1 API.
 private fun viewportBounds(map: KakaoMap): MapBounds? {
     val rect = map.viewport
@@ -199,8 +231,20 @@ fun KakaoApartmentMap(
                             }
                         }
                         zoom = 17
-                    } else if (regionDepth == 1 && (region == "서울특별시" || region.isBlank())) {
-                        point = SEOUL_CITY_HALL; zoom = if (initialZoom > 0) initialZoom else 13
+                    } else if (regionDepth == 1 && sidoViewExtents.containsKey(region)) {
+                        // Fit the whole selected province/city rather than zooming into its center.
+                        // View extent is approximate; no geocoder or server request is needed.
+                        val extent = sidoViewExtents.getValue(region)
+                        bounds = null
+                        fitSidoView(current, extent, context.resources.displayMetrics.density)
+                        view.post { if (map === current) {
+                            labelZoom = current.zoomLevel
+                            bounds = viewportBounds(current)
+                        } }
+                        positionLoading = false
+                        return@LaunchedEffect
+                    } else if (regionDepth == 1 && region.isBlank()) {
+                        point = SEOUL_CITY_HALL; zoom = 12
                     } else {
                         point = withContext(Dispatchers.IO) {
                             @Suppress("DEPRECATION")
