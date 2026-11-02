@@ -77,6 +77,7 @@ fun KakaoApartmentMap(
     var labelZoom by remember { mutableIntStateOf(15) }
     var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
+    var dismissedError by remember { mutableStateOf<String?>(null) }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -281,9 +282,12 @@ fun KakaoApartmentMap(
             Text(if (loading) "지도 데이터를 조회 중입니다…" else if (displayedLevel == 3) "조회 ${count}곳 · 전용평수 · 단지 선택 시 상세" else "행정구역 ${count}곳 · 단지 수 집계 · 누르면 확대",
                 style = MaterialTheme.typography.bodySmall)
             val failure = mapError ?: positionError ?: loadError
-            failure?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { retry++ }, enabled = !loading) { Text("현재 화면 다시 조회") }
+            failure?.takeIf { it != dismissedError }?.let { errorMessage ->
+                AppMessageDialog(
+                    title = "지도 데이터 연결 오류", message = errorMessage,
+                    onDismiss = { dismissedError = errorMessage },
+                    onRetry = { dismissedError = errorMessage; retry++ }
+                )
             }
         }
     }
