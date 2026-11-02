@@ -129,6 +129,23 @@ internal suspend fun loadViewportApartments(
 }
 
 
+internal data class RegionFocus(val bounds: MapBounds?, val count: Int, val groupCount: Int)
+
+internal suspend fun loadRegionFocus(
+    sidoCode: String, sigunguCode: String = "", dongName: String = ""
+): RegionFocus {
+    val path = "/api/map-region-focus/?sido_code=${encoded(sidoCode)}" +
+        "&sigungu_code=${encoded(sigunguCode)}&dong_name=${encoded(dongName)}"
+    val response = portalJson(path) as? JSONObject
+        ?: error("행정구역 지도 응답이 올바르지 않습니다.")
+    val bbox = response.optJSONObject("bounds")
+    val bounds = if (bbox == null) null else MapBounds(
+        bbox.getDouble("west"), bbox.getDouble("south"),
+        bbox.getDouble("east"), bbox.getDouble("north"))
+    return RegionFocus(bounds, response.optInt("count"),
+        response.optJSONArray("groups")?.length() ?: 0)
+}
+
 internal data class RegionMarker(
     val code: String, val name: String, val type: String,
     val count: Int, val latitude: Double, val longitude: Double
