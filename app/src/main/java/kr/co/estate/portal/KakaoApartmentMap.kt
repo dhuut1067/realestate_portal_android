@@ -86,7 +86,7 @@ private suspend fun regionGroupFocus(
     val districts = loadViewportRegions(province, 8)
     val district = districts.firstOrNull { it.code == districtCode }
         ?: return null
-    val radius = if (provinceName.endsWith("광역시") || provinceName == "서울특별시") 0.16 else 0.34
+    val radius = if (provinceName.endsWith("광역시") || provinceName == "서울특별시") 0.35 else 0.65
     val around = MapBounds(district.longitude - radius, district.latitude - radius,
         district.longitude + radius, district.latitude + radius)
     val localities = loadViewportRegions(around, 5)
@@ -174,6 +174,9 @@ fun KakaoApartmentMap(
                 KakaoMapSdk.init(context.applicationContext, appKey)
                 MapView(context).apply {
                     setOnTouchListener { v, event ->
+                        if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                            explicitLevel = null // pinch: restore zoom-dependent group levels
+                        }
                         v.parent?.requestDisallowInterceptTouchEvent(
                             event.actionMasked != MotionEvent.ACTION_UP && event.actionMasked != MotionEvent.ACTION_CANCEL)
                         false
@@ -305,7 +308,7 @@ fun KakaoApartmentMap(
                                 ?: error("$region 중심 좌표를 찾지 못했습니다.")
                             LatLng.from(address.latitude, address.longitude)
                         }
-                        zoom = if (regionDepth >= 3) 15 else 13
+                        zoom = if (regionDepth >= 3) 17 else 14
                     } else if (regionDepth == 1 && sidoViewExtents.containsKey(region)) {
                         // Fit the whole selected province/city rather than zooming into its center.
                         // View extent is approximate; no geocoder or server request is needed.
