@@ -208,7 +208,7 @@ fun KakaoApartmentMap(
                 finally { positionLoading = false }
             }
 
-            LaunchedEffect(map, bounds, retry) {
+            LaunchedEffect(map, bounds, labelZoom, retry) {
                 val current = map ?: return@LaunchedEffect
                 val visible = bounds ?: return@LaunchedEffect
                 delay(350) // Coalesce rapid gestures; cancellation discards stale responses.
