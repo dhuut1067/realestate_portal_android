@@ -58,7 +58,8 @@ private fun viewportBounds(map: KakaoMap): MapBounds? {
 @Composable
 fun KakaoApartmentMap(
     selected: ServerApartment?, region: String, regionDepth: Int,
-    focusRequest: Int, mapHeight: Dp, showMap: Boolean = true, onSelect: (ServerApartment) -> Unit
+    focusRequest: Int, mapHeight: Dp, showMap: Boolean = true, onSelect: (ServerApartment) -> Unit,
+    initialZoom: Int = 0
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -136,9 +137,9 @@ fun KakaoApartmentMap(
                             val regionMarker = label.tag as? RegionMarker
                             if (regionMarker != null) {
                                 val nextZoom = when (regionMarker.type) {
-                                    "sido" -> 12
-                                    "sigungu" -> 14
-                                    else -> 17
+                                    "sido" -> 13
+                                    "sigungu" -> 15
+                                    else -> 16
                                 }
                                 current.moveCamera(CameraUpdateFactory.newCenterPosition(
                                     LatLng.from(regionMarker.latitude, regionMarker.longitude), nextZoom))
@@ -168,7 +169,7 @@ fun KakaoApartmentMap(
             AndroidView(factory = { view }, update = { it.visibility = if (showMap) View.VISIBLE else View.INVISIBLE }, modifier = Modifier.fillMaxWidth().height(mapHeight))
 
             // This effect ONLY moves the camera. Loading results never moves it back.
-            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest) {
+            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom) {
                 val current = map ?: return@LaunchedEffect
                 positionError = null; positionLoading = true
                 try {
@@ -189,7 +190,7 @@ fun KakaoApartmentMap(
                         }
                         zoom = 17
                     } else if (regionDepth == 1 && (region == "서울특별시" || region.isBlank())) {
-                        point = SEOUL_CITY_HALL; zoom = 15
+                        point = SEOUL_CITY_HALL; zoom = if (initialZoom > 0) initialZoom else 13
                     } else {
                         point = withContext(Dispatchers.IO) {
                             @Suppress("DEPRECATION")
@@ -197,7 +198,7 @@ fun KakaoApartmentMap(
                                 ?: error("$region 중심 좌표를 찾지 못했습니다.")
                             LatLng.from(address.latitude, address.longitude)
                         }
-                        zoom = if (regionDepth >= 3) 16 else if (regionDepth == 2) 14 else 12
+                        zoom = if (initialZoom > 0) initialZoom else if (regionDepth >= 3) 16 else if (regionDepth == 2) 14 else 12
                     }
                     bounds = null
                     current.moveCamera(CameraUpdateFactory.newCenterPosition(point, zoom))
