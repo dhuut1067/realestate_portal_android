@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
 
@@ -70,17 +71,16 @@ fun ServerSearchScreen(showMap: Boolean = true, onSelect: (ServerApartment) -> U
     var sigungu by remember { mutableStateOf<RegionOption?>(null) }
     var dong by remember { mutableStateOf<RegionOption?>(null) }
     var apartment by remember { mutableStateOf<ServerApartment?>(null) }
-    var sidoRetry by remember { mutableIntStateOf(0) }
-    var sigunguRetry by remember { mutableIntStateOf(0) }
-    var dongRetry by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
     var apartmentRetry by remember { mutableIntStateOf(0) }
     var focusRequest by remember { mutableIntStateOf(0) }
-    val sidos = rememberOptions("sidos", sidoRetry) { getRegions("/api/sidos/") }
-    val sigungus = rememberOptions(sido?.code, sigunguRetry) {
-        getRegions("/api/sigungus/?sido_code=${encoded(sido!!.code)}&sido=${encoded(sido!!.name)}")
+    var message by remember { mutableStateOf<String?>(null) }
+    val sidos = remember(context) { LocalRegionIndex.sidos(context) }
+    val sigungus = remember(context, sido?.code) {
+        LocalRegionIndex.sigungus(context, sido?.code.orEmpty())
     }
-    val dongs = rememberOptions(sigungu?.code, dongRetry) {
-        getRegions("/api/dongs/?sigungu_code=${encoded(sigungu!!.code)}&sgg_cd=${encoded(sigungu!!.code)}")
+    val dongs = remember(context, sido?.code, sigungu?.code) {
+        LocalRegionIndex.dongs(context, sido?.code.orEmpty(), sigungu?.code.orEmpty())
     }
     val apartments = rememberOptions(dong?.code, apartmentRetry) { getApartments(dong!!.code) }
     val region = listOfNotNull(sido?.name, sigungu?.name, dong?.name).joinToString(" ")
@@ -93,31 +93,33 @@ fun ServerSearchScreen(showMap: Boolean = true, onSelect: (ServerApartment) -> U
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("지역을 선택하면 지도 중심과 화면 안 실거래 단지를 갱신합니다.", style = MaterialTheme.typography.bodySmall)
-                ChoiceField("시도", sido, sidos.rows, { it.name }, true, sidos.loading, sidos.failure, { sidoRetry++ }) {
+                ChoiceField("시도", sido, sidos, { it.name }, true, false, null, { }) {
                     sido = it; sigungu = null; dong = null; apartment = null; focusRequest++
                 }
-                ChoiceField("시군구", sigungu, sigungus.rows, { it.name }, sido != null,
-                    sigungus.loading, sigungus.failure, { sigunguRetry++ }) {
+                ChoiceField("시군구", sigungu, sigungus, { it.name }, sido != null,
+                    false, null, { }) {
                     sigungu = it; dong = null; apartment = null; focusRequest++
                 }
-                ChoiceField("읍면동", dong, dongs.rows, { it.name }, sigungu != null,
-                    dongs.loading, dongs.failure, { dongRetry++ }) {
+                ChoiceField("읍면동", dong, dongs, { it.name }, sigungu != null,
+                    false, null, { }) {
                     dong = it; apartment = null; focusRequest++
                 }
                 ChoiceField("아파트", apartment, apartments.rows, { it.name }, dong != null,
                     apartments.loading, apartments.failure, { apartmentRetry++ }) {
                     apartment = it; focusRequest++
                 }
-                Button(onClick = { focusRequest++ }, enabled = sido != null, modifier = Modifier.fillMaxWidth()) {
+                Button(onClick = { focusRequest++; message = "선택한 지역으로 지도를 이동합니다.\\n$region" }, enabled = sido != null, modifier = Modifier.fillMaxWidth()) {
                     Text("선택 위치로 지도 이동")
                 }
                 if (apartment != null) OutlinedButton(onClick = { apartment?.let(onSelect) }, modifier = Modifier.fillMaxWidth()) {
                     Text("선택 단지 실거래 보기")
                 }
-                listOfNotNull(sidos.failure, sigungus.failure, dongs.failure, apartments.failure).firstOrNull()?.let {
-                    Text("지역 조회 실패: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                }
+                apartments.failure?.let { Text("단지 조회 실패: $it", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             }
+        }
+        message?.let { current ->
+            AppMessageDialog(title = "안내 메시지", message = current,
+                onDismiss = { message = null })
         }
     }
 }
