@@ -89,7 +89,7 @@ fun ServerSearchScreen(showMap: Boolean = true, onSelect: (ServerApartment) -> U
         apartment != null -> 17
         dong != null -> 16
         sigungu != null -> if (dongs.size <= 7) 16 else 14
-        sido?.name in listOf("서울특별시", "부산광역시", "인천광역시", "대구광역시",
+        sido?.name.orEmpty() in listOf("서울특별시", "부산광역시", "인천광역시", "대구광역시",
             "대전광역시", "광주광역시", "울산광역시") -> 13
         sido?.name == "세종특별자치시" -> 14
         else -> 11
