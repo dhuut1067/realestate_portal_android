@@ -136,9 +136,9 @@ fun KakaoApartmentMap(
                             val regionMarker = label.tag as? RegionMarker
                             if (regionMarker != null) {
                                 val nextZoom = when (regionMarker.type) {
-                                    "sido" -> 9
-                                    "sigungu" -> 6
-                                    else -> 3
+                                    "sido" -> 12
+                                    "sigungu" -> 14
+                                    else -> 17
                                 }
                                 current.moveCamera(CameraUpdateFactory.newCenterPosition(
                                     LatLng.from(regionMarker.latitude, regionMarker.longitude), nextZoom))
