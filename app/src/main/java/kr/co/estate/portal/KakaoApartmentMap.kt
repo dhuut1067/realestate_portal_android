@@ -59,6 +59,7 @@ private val sidoViewExtents: Map<String, MapBounds> = mapOf(
     "대구광역시" to MapBounds(128.34, 35.59, 128.83, 36.04),
     "인천광역시" to MapBounds(124.60, 36.85, 126.83, 38.10),
     "광주광역시" to MapBounds(126.63, 35.03, 127.02, 35.27),
+    "광주전남통합특별시" to MapBounds(125.99, 33.88, 127.88, 35.50),
     "대전광역시" to MapBounds(127.24, 36.18, 127.57, 36.50),
     "울산광역시" to MapBounds(128.97, 35.32, 129.48, 35.75),
     "세종특별자치시" to MapBounds(127.08, 36.42, 127.40, 36.75),
@@ -157,6 +158,7 @@ fun KakaoApartmentMap(
     var labelZoom by remember { mutableIntStateOf(15) }
     var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
+    var explicitLevel by remember { mutableStateOf<Int?>(null) }
     var lastNotice by remember { mutableStateOf("지도 준비 중입니다.") }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -215,10 +217,17 @@ fun KakaoApartmentMap(
                             val apartment = label.tag as? ServerApartment
                             val regionMarker = label.tag as? RegionMarker
                             if (regionMarker != null) {
+                                // A cluster click advances the DATA level, not only camera zoom.
+                                explicitLevel = when (regionMarker.type) {
+                                    "sido" -> 8
+                                    "sigungu" -> 5
+                                    else -> 3
+                                }
+                                bounds = null
                                 val nextZoom = when (regionMarker.type) {
                                     "sido" -> 13
                                     "sigungu" -> 15
-                                    else -> 16
+                                    else -> 17
                                 }
                                 current.moveCamera(CameraUpdateFactory.newCenterPosition(
                                     LatLng.from(regionMarker.latitude, regionMarker.longitude), nextZoom))
@@ -251,6 +260,11 @@ fun KakaoApartmentMap(
             LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom, districtCode, localityName) {
                 val current = map ?: return@LaunchedEffect
                 positionError = null; positionLoading = true
+                explicitLevel = when {
+                    selected != null || regionDepth >= 3 -> 3
+                    regionDepth == 2 -> 5
+                    else -> 8
+                }
                 try {
                     val point: LatLng
                     val zoom: Int
@@ -324,20 +338,20 @@ fun KakaoApartmentMap(
                 finally { positionLoading = false }
             }
 
-            LaunchedEffect(map, bounds, labelZoom, retry) {
+            LaunchedEffect(map, bounds, labelZoom, retry, explicitLevel) {
                 val current = map ?: return@LaunchedEffect
                 val visible = bounds ?: return@LaunchedEffect
                 delay(350) // Coalesce rapid gestures; cancellation discards stale responses.
                 loading = true; loadError = null
                 lastNotice = "현재 지도 범위 조회 중 · 확대 ${labelZoom}단계"
                 try {
-                    val level = regionLevel(labelZoom)
+                    val level = explicitLevel ?: regionLevel(labelZoom)
                     if (level == 3) {
                         val apartments = loadViewportApartments(visible)
                         apartmentsOnMap = apartments
                         regionsOnMap = emptyList()
                         count = apartments.size
-                        lastNotice = "개별 아파트 ${apartments.size}곳 조회 완료"
+                        lastNotice = "개별 아파트 ${apartments.size}곳 조회 완료 · 실거래가 없는 단지도 포함"
                     } else {
                         val regions = loadViewportRegions(visible, level)
                         regionsOnMap = regions
