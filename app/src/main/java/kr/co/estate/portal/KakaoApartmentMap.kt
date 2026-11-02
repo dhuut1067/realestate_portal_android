@@ -85,7 +85,7 @@ private fun viewportBounds(map: KakaoMap): MapBounds? {
 fun KakaoApartmentMap(
     selected: ServerApartment?, region: String, regionDepth: Int,
     focusRequest: Int, mapHeight: Dp, showMap: Boolean = true, onSelect: (ServerApartment) -> Unit,
-    initialZoom: Int = 0, sidoCode: String = "", provinceName: String = "", districtCode: String = "", localityName: String? = null
+    initialZoom: Int = 0, sidoCode: String = "", provinceName: String = "", districtCode: String = "", localityName: String? = null, districtName: String = ""
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -206,7 +206,7 @@ fun KakaoApartmentMap(
             AndroidView(factory = { view }, update = { it.visibility = if (showMap) View.VISIBLE else View.INVISIBLE }, modifier = Modifier.fillMaxWidth().height(mapHeight))
 
             // This effect ONLY moves the camera. Loading results never moves it back.
-            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom, sidoCode, districtCode, localityName) {
+            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom, sidoCode, districtCode, localityName, districtName) {
                 val current = map ?: return@LaunchedEffect
                 positionError = null; positionLoading = true
                 explicitLevel = when {
@@ -237,7 +237,8 @@ fun KakaoApartmentMap(
                         val focus = loadRegionFocus(
                             sidoCode,
                             if (regionDepth >= 2) districtCode else "",
-                            if (regionDepth >= 3) localityName.orEmpty() else ""
+                            if (regionDepth >= 3) localityName.orEmpty() else "",
+                            if (regionDepth >= 2) districtName else ""
                         )
                         val geographicBounds = focus.bounds
                             ?: error("선택 지역에 좌표가 등록된 아파트가 없습니다. (등록 좌표 0곳)")
