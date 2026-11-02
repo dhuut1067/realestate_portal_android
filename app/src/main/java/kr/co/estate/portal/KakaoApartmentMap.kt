@@ -72,6 +72,8 @@ fun KakaoApartmentMap(
     var loading by remember { mutableStateOf(false) }
     var count by remember { mutableIntStateOf(0) }
     var apartmentsOnMap by remember { mutableStateOf<List<ServerApartment>>(emptyList()) }
+    var regionsOnMap by remember { mutableStateOf<List<RegionMarker>>(emptyList()) }
+    var displayedLevel by remember { mutableIntStateOf(3) }
     var labelZoom by remember { mutableIntStateOf(15) }
     var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
@@ -130,6 +132,16 @@ fun KakaoApartmentMap(
                             .setZOrder(5000).setClickable(true))
                         current.setOnLabelClickListener { _, _, label ->
                             val apartment = label.tag as? ServerApartment
+                            val regionMarker = label.tag as? RegionMarker
+                            if (regionMarker != null) {
+                                val nextZoom = when (regionMarker.type) {
+                                    "sido" -> 9
+                                    "sigungu" -> 6
+                                    else -> 3
+                                }
+                                current.moveCamera(CameraUpdateFactory.newCenterPosition(
+                                    LatLng.from(regionMarker.latitude, regionMarker.longitude), nextZoom))
+                            }
                             view.post { if (active && apartment != null) select(apartment) }
                             true
                         }
@@ -201,9 +213,19 @@ fun KakaoApartmentMap(
                 delay(350) // Coalesce rapid gestures; cancellation discards stale responses.
                 loading = true; loadError = null
                 try {
-                    val apartments = loadViewportApartments(visible)
-                    apartmentsOnMap = apartments
-                    count = apartments.size
+                    val level = regionLevel(labelZoom)
+                    if (level == 3) {
+                        val apartments = loadViewportApartments(visible)
+                        apartmentsOnMap = apartments
+                        regionsOnMap = emptyList()
+                        count = apartments.size
+                    } else {
+                        val regions = loadViewportRegions(visible, level)
+                        regionsOnMap = regions
+                        apartmentsOnMap = emptyList()
+                        count = regions.size
+                    }
+                    displayedLevel = level
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { loadError = "화면 단지 조회 실패: ${e.message}" }
                 finally { loading = false }
@@ -211,7 +233,7 @@ fun KakaoApartmentMap(
 
             // Rendering is separate from network access. Font controls redraw immediately;
             // Redraw each opaque card at the active zoom size.
-            LaunchedEffect(map, apartmentsOnMap, labelSizeStep, labelZoom, selected?.identity) {
+            LaunchedEffect(map, apartmentsOnMap, regionsOnMap, labelSizeStep, labelZoom, selected?.identity) {
                 val current = map ?: return@LaunchedEffect
                 val manager = current.labelManager ?: return@LaunchedEffect
                 val layer = manager.getLayer("actual-trades") ?: return@LaunchedEffect
@@ -221,6 +243,20 @@ fun KakaoApartmentMap(
                 val zoomScale = (1f + (labelZoom - 15) * 0.06f).coerceIn(0.70f, 1.36f)
                 val scale = density * fontScale * userScale * zoomScale
                 layer.removeAll()
+                regionsOnMap.forEachIndexed { index, regionMarker ->
+                    coroutineContext.ensureActive()
+                    val card = opaqueTradeCard(regionMarker.name, "${regionMarker.count}단지", scale)
+                    layer.addLabel(LabelOptions.from("region-${regionMarker.code}",
+                        LatLng.from(regionMarker.latitude, regionMarker.longitude))
+                        .setStyles(LabelStyle.from(card).setApplyDpScale(false)
+                            .setAnchorPoint(0.5f, 0.5f)
+                            .setIconTransition(LabelTransition.from(Transition.None, Transition.None)
+                                .enableTransitionWhenChange(false, false))
+                            .setTextTransition(LabelTransition.from(Transition.None, Transition.None)
+                                .enableTransitionWhenChange(false, false)))
+                        .setRank(1000000L + regionMarker.count).setClickable(true).setTag(regionMarker))
+                    if (index % 40 == 0) yield()
+                }
                 apartmentsOnMap.forEachIndexed { index, apt ->
                     coroutineContext.ensureActive()
                     val price = apt.latestPrice?.let { String.format(Locale.KOREA, "%.2f억", it / 10000.0) } ?: "가격 미상"
@@ -242,7 +278,7 @@ fun KakaoApartmentMap(
                 }
             }
             if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(if (loading) "화면 안 실거래 단지를 조회 중입니다…" else "조회 ${count}곳 · 전용평수 · 전체 라벨 표시 · 누르면 상세",
+            Text(if (loading) "지도 데이터를 조회 중입니다…" else if (displayedLevel == 3) "조회 ${count}곳 · 전용평수 · 단지 선택 시 상세" else "행정구역 ${count}곳 · 단지 수 집계 · 누르면 확대",
                 style = MaterialTheme.typography.bodySmall)
             val failure = mapError ?: positionError ?: loadError
             failure?.let {
