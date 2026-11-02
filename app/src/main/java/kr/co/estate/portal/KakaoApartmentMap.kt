@@ -51,75 +51,21 @@ import kotlin.math.roundToInt
 
 private val SEOUL_CITY_HALL: LatLng get() = LatLng.from(37.5665, 126.9780)
 
-// Approximate geographic envelopes used to fit a whole province/city on screen.
-// These are VIEW extents, not legal administrative boundary polygons.
-private val sidoViewExtents: Map<String, MapBounds> = mapOf(
-    "서울특별시" to MapBounds(126.75, 37.40, 127.22, 37.73),
-    "부산광역시" to MapBounds(128.75, 34.85, 129.38, 35.41),
-    "대구광역시" to MapBounds(128.34, 35.59, 128.83, 36.04),
-    "인천광역시" to MapBounds(124.60, 36.85, 126.83, 38.10),
-    "광주광역시" to MapBounds(126.63, 35.03, 127.02, 35.27),
-    "광주전남통합특별시" to MapBounds(125.99, 33.88, 127.88, 35.50),
-    "대전광역시" to MapBounds(127.24, 36.18, 127.57, 36.50),
-    "울산광역시" to MapBounds(128.97, 35.32, 129.48, 35.75),
-    "세종특별자치시" to MapBounds(127.08, 36.42, 127.40, 36.75),
-    "경기도" to MapBounds(126.37, 36.88, 127.91, 38.33),
-    "강원특별자치도" to MapBounds(127.08, 37.03, 129.38, 38.64),
-    "강원도" to MapBounds(127.08, 37.03, 129.38, 38.64),
-    "충청북도" to MapBounds(127.26, 36.00, 128.66, 37.26),
-    "충청남도" to MapBounds(125.94, 35.96, 127.64, 37.10),
-    "전북특별자치도" to MapBounds(126.40, 35.28, 127.94, 36.15),
-    "전라북도" to MapBounds(126.40, 35.28, 127.94, 36.15),
-    "전라남도" to MapBounds(125.99, 33.88, 127.88, 35.50),
-    "경상북도" to MapBounds(128.06, 35.55, 131.90, 37.56),
-    "경상남도" to MapBounds(127.55, 34.57, 129.23, 35.97),
-    "제주특별자치도" to MapBounds(126.14, 33.10, 126.98, 33.62)
-)
-
-// Read the SAME geographic groups that Django uses for map labels.
-// A district is fitted to its locality clusters; the largest cluster anchors the view.
-// No address-geocoder result or hardcoded fixed district zoom is needed.
-private suspend fun regionGroupFocus(
-    provinceName: String, districtCode: String, localityName: String?
-): Pair<List<RegionMarker>, RegionMarker>? {
-    val province = sidoViewExtents[provinceName] ?: return null
-    val districts = loadViewportRegions(province, 8)
-    val district = districts.firstOrNull { it.code == districtCode }
-        ?: return null
-    val radius = if (provinceName.endsWith("광역시") || provinceName == "서울특별시") 0.35 else 0.65
-    val around = MapBounds(district.longitude - radius, district.latitude - radius,
-        district.longitude + radius, district.latitude + radius)
-    val localities = loadViewportRegions(around, 5)
-        .filter { it.code.substringBefore(":") == districtCode }
-    if (localityName != null) {
-        val locality = localities.filter { it.name == localityName }
-            .maxByOrNull { it.count } ?: return null
-        return listOf(locality) to locality
-    }
-    return localities to (localities.maxByOrNull { it.count } ?: district)
-}
-
-private fun fitRegionMarkers(
-    current: KakaoMap, markers: List<RegionMarker>, representative: RegionMarker,
-    density: Float
+// Fit the actual registered apartment coordinates, irrespective of transaction prices.
+// The Django endpoint uses province/district codes, so no province-specific map presets
+// or fixed-distance search radii are necessary.
+private fun fitAdministrativeBounds(
+    current: KakaoMap, bounds: MapBounds, density: Float, maxZoom: Int
 ) {
-    if (markers.size <= 1) {
-        current.moveCamera(CameraUpdateFactory.newCenterPosition(
-            LatLng.from(representative.latitude, representative.longitude), 15))
-        return
-    }
-    val points = markers.map { LatLng.from(it.latitude, it.longitude) }.toTypedArray()
-    current.moveCamera(CameraUpdateFactory.fitMapPoints(points, (24f * density).toInt(), 15))
-}
-
-private fun fitSidoView(current: KakaoMap, bounds: MapBounds, density: Float) {
+    val latitudePadding = ((bounds.north - bounds.south) * 0.07).coerceAtLeast(0.003)
+    val longitudePadding = ((bounds.east - bounds.west) * 0.07).coerceAtLeast(0.003)
     val corners = arrayOf(
-        LatLng.from(bounds.south, bounds.west),
-        LatLng.from(bounds.north, bounds.east)
+        LatLng.from(bounds.south - latitudePadding, bounds.west - longitudePadding),
+        LatLng.from(bounds.north + latitudePadding, bounds.east + longitudePadding)
     )
-    current.moveCamera(CameraUpdateFactory.fitMapPoints(corners, (12f * density).toInt(), 13))
+    current.moveCamera(CameraUpdateFactory.fitMapPoints(
+        corners, (12f * density).toInt(), maxZoom))
 }
-
 
 // Use all four screen corners: also covers rotated maps. SDK 2.15.1 API.
 private fun viewportBounds(map: KakaoMap): MapBounds? {
@@ -139,7 +85,7 @@ private fun viewportBounds(map: KakaoMap): MapBounds? {
 fun KakaoApartmentMap(
     selected: ServerApartment?, region: String, regionDepth: Int,
     focusRequest: Int, mapHeight: Dp, showMap: Boolean = true, onSelect: (ServerApartment) -> Unit,
-    initialZoom: Int = 0, provinceName: String = "", districtCode: String = "", localityName: String? = null
+    initialZoom: Int = 0, sidoCode: String = "", provinceName: String = "", districtCode: String = "", localityName: String? = null
 ) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
@@ -260,7 +206,7 @@ fun KakaoApartmentMap(
             AndroidView(factory = { view }, update = { it.visibility = if (showMap) View.VISIBLE else View.INVISIBLE }, modifier = Modifier.fillMaxWidth().height(mapHeight))
 
             // This effect ONLY moves the camera. Loading results never moves it back.
-            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom, districtCode, localityName) {
+            LaunchedEffect(map, selected?.identity, region, regionDepth, focusRequest, initialZoom, sidoCode, districtCode, localityName) {
                 val current = map ?: return@LaunchedEffect
                 positionError = null; positionLoading = true
                 explicitLevel = when {
@@ -285,41 +231,26 @@ fun KakaoApartmentMap(
                             }
                         }
                         zoom = 17
-                    } else if (regionDepth >= 2 && districtCode.isNotBlank()) {
-                        val grouped = regionGroupFocus(provinceName, districtCode,
-                            if (regionDepth >= 3) localityName else null)
-                        if (grouped != null) {
-                            val (markers, representative) = grouped
-                            bounds = null
-                            fitRegionMarkers(current, markers, representative,
-                                context.resources.displayMetrics.density)
-                            lastNotice = if (regionDepth >= 3) {
-                                "${representative.name} · ${representative.count}단지 그룹 중심"
-                            } else {
-                                "${representative.name} · ${representative.count}단지 최다 그룹 중심 · 총 ${markers.size}개 읍면동"
-                            }
-                            return@LaunchedEffect
-                        }
-                        // Fallback when no mapped complexes exist in the chosen district.
-                        point = withContext(Dispatchers.IO) {
-                            @Suppress("DEPRECATION")
-                            val address = Geocoder(context, Locale.KOREA)
-                                .getFromLocationName(region, 1)?.firstOrNull()
-                                ?: error("$region 중심 좌표를 찾지 못했습니다.")
-                            LatLng.from(address.latitude, address.longitude)
-                        }
-                        zoom = if (regionDepth >= 3) 17 else 14
-                    } else if (regionDepth == 1 && sidoViewExtents.containsKey(region)) {
-                        // Fit the whole selected province/city rather than zooming into its center.
-                        // View extent is approximate; no geocoder or server request is needed.
-                        val extent = sidoViewExtents.getValue(region)
+                    } else if (sidoCode.isNotBlank()) {
+                        // One universal rule for all provinces, districts and localities:
+                        // derive map bounds from every registered geocoded apartment.
+                        val focus = loadRegionFocus(
+                            sidoCode,
+                            if (regionDepth >= 2) districtCode else "",
+                            if (regionDepth >= 3) localityName.orEmpty() else ""
+                        )
+                        val geographicBounds = focus.bounds
+                            ?: error("선택 지역에 좌표가 등록된 아파트가 없습니다. (등록 좌표 0곳)")
                         bounds = null
-                        fitSidoView(current, extent, context.resources.displayMetrics.density)
-                        view.post { if (map === current) {
-                            labelZoom = current.zoomLevel
-                            bounds = viewportBounds(current)
-                        } }
-                        positionLoading = false
+                        fitAdministrativeBounds(current, geographicBounds,
+                            context.resources.displayMetrics.density,
+                            when {
+                                regionDepth >= 3 -> 17
+                                regionDepth == 2 -> 15
+                                else -> 13
+                            })
+                        lastNotice = "$region · 등록 단지 ${focus.count}곳 · 그룹 ${focus.groupCount}개"
+                        // Camera move-end publishes the new viewport and zoom.
                         return@LaunchedEffect
                     } else if (regionDepth == 1 && region.isBlank()) {
                         point = SEOUL_CITY_HALL; zoom = 12
