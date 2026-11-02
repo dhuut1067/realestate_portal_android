@@ -99,7 +99,8 @@ fun ServerSearchScreen(showMap: Boolean = true, onSelect: (ServerApartment) -> U
         val mapHeight = (maxHeight * 0.48f).coerceIn(150.dp, 330.dp)
         Column(Modifier.fillMaxSize()) {
             KakaoApartmentMap(apartment, region, if (dong != null) 3 else if (sigungu != null) 2 else 1,
-                focusRequest, mapHeight, showMap, onSelect, initialZoom)
+                focusRequest, mapHeight, showMap, onSelect, initialZoom,
+                sido?.name.orEmpty(), sigungu?.code.orEmpty(), dong?.name)
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("지역을 선택하면 지도 중심과 화면 안 실거래 단지를 갱신합니다.", style = MaterialTheme.typography.bodySmall)
