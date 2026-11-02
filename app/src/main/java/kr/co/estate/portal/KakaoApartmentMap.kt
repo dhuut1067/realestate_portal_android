@@ -10,6 +10,16 @@ import android.location.Geocoder
 import android.view.MotionEvent
 import android.view.View
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -78,7 +88,7 @@ fun KakaoApartmentMap(
     var labelZoom by remember { mutableIntStateOf(15) }
     var labelSizeStep by remember { mutableIntStateOf(0) }
     var retry by remember { mutableIntStateOf(0) }
-    var dismissedError by remember { mutableStateOf<String?>(null) }
+    var lastNotice by remember { mutableStateOf("지도 준비 중입니다.") }
     val appKey = BuildConfig.KAKAO_NATIVE_APP_KEY
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -214,6 +224,7 @@ fun KakaoApartmentMap(
                 val visible = bounds ?: return@LaunchedEffect
                 delay(350) // Coalesce rapid gestures; cancellation discards stale responses.
                 loading = true; loadError = null
+                lastNotice = "현재 지도 범위 조회 중 · 확대 ${labelZoom}단계"
                 try {
                     val level = regionLevel(labelZoom)
                     if (level == 3) {
@@ -221,15 +232,18 @@ fun KakaoApartmentMap(
                         apartmentsOnMap = apartments
                         regionsOnMap = emptyList()
                         count = apartments.size
+                        lastNotice = "개별 아파트 ${apartments.size}곳 조회 완료"
                     } else {
                         val regions = loadViewportRegions(visible, level)
                         regionsOnMap = regions
                         apartmentsOnMap = emptyList()
                         count = regions.size
+                        lastNotice = "행정구역 ${regions.size}곳 조회 완료"
                     }
                     displayedLevel = level
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { loadError = "화면 단지 조회 실패: ${e.message}" }
+                catch (e: Exception) { loadError = "화면 단지 조회 실패: ${e.message}"
+                    lastNotice = loadError.orEmpty() }
                 finally { loading = false }
             }
 
@@ -279,16 +293,43 @@ fun KakaoApartmentMap(
                     if (index % 40 == 0) yield()
                 }
             }
-            if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Text(if (loading) "지도 데이터를 조회 중입니다…" else if (displayedLevel == 3) "조회 ${count}곳 · 전용평수 · 단지 선택 시 상세" else "행정구역 ${count}곳 · 단지 수 집계 · 누르면 확대",
-                style = MaterialTheme.typography.bodySmall)
             val failure = mapError ?: positionError ?: loadError
-            failure?.takeIf { it != dismissedError }?.let { errorMessage ->
-                AppMessageDialog(
-                    title = "지도 데이터 연결 오류", message = errorMessage,
-                    onDismiss = { dismissedError = errorMessage },
-                    onRetry = { dismissedError = errorMessage; retry++ }
-                )
+            val statusMessage = when {
+                failure != null -> failure
+                loading || positionLoading -> "지도 데이터를 조회 중입니다…"
+                else -> lastNotice + if (count == 0) " · 조회 결과 0곳. 지도 이동 또는 다시 조회를 이용하십시오." else ""
+            }
+            // This panel replaces the former variable-height status text.
+            // Normal progress, zero results and errors all share this ONE fixed location.
+            val statusScroll = rememberScrollState()
+            Column(Modifier.fillMaxWidth().height(108.dp)
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 8.dp, vertical = 4.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("지도 조회 메시지", style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.weight(1f))
+                    TextButton(onClick = { retry++ }, enabled = !loading) { Text("다시 조회") }
+                }
+                if (loading || positionLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    Text(statusMessage, modifier = Modifier.fillMaxSize()
+                        .padding(end = 12.dp).verticalScroll(statusScroll),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (failure != null) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurface)
+                    Canvas(Modifier.align(Alignment.CenterEnd).width(4.dp).fillMaxHeight()) {
+                        drawRect(ComposeColor.LightGray.copy(alpha = 0.4f))
+                        val range = statusScroll.maxValue
+                        val thumb = if (range <= 0) size.height else
+                            (size.height * size.height / (size.height + range))
+                                .coerceIn(10.dp.toPx(), size.height)
+                        val y = if (range <= 0) 0f
+                            else (statusScroll.value.toFloat() / range) * (size.height - thumb)
+                        drawRect(ComposeColor.Gray, topLeft = Offset(0f, y),
+                            size = Size(size.width, thumb))
+                    }
+                }
             }
         }
     }
