@@ -132,10 +132,12 @@ internal suspend fun loadViewportApartments(
 internal data class RegionFocus(val bounds: MapBounds?, val count: Int, val groupCount: Int)
 
 internal suspend fun loadRegionFocus(
-    sidoCode: String, sigunguCode: String = "", dongName: String = ""
+    sidoCode: String, sigunguCode: String = "", dongName: String = "",
+    sigunguName: String = ""
 ): RegionFocus {
     val path = "/api/map-region-focus/?sido_code=${encoded(sidoCode)}" +
-        "&sigungu_code=${encoded(sigunguCode)}&dong_name=${encoded(dongName)}"
+        "&sigungu_code=${encoded(sigunguCode)}&dong_name=${encoded(dongName)}" +
+        "&sigungu_name=${encoded(sigunguName)}"
     val response = portalJson(path) as? JSONObject
         ?: error("행정구역 지도 응답이 올바르지 않습니다.")
     val bbox = response.optJSONObject("bounds")
