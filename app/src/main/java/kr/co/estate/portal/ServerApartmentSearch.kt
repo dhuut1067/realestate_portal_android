@@ -84,12 +84,22 @@ fun ServerSearchScreen(showMap: Boolean = true, onSelect: (ServerApartment) -> U
     }
     val apartments = rememberOptions(dong?.code, apartmentRetry) { getApartments(dong!!.code) }
     val region = listOfNotNull(sido?.name, sigungu?.name, dong?.name).joinToString(" ")
+    // More detailed initial views for small districts, wider views for large provinces.
+    val initialZoom = when {
+        apartment != null -> 17
+        dong != null -> 16
+        sigungu != null -> if (dongs.size <= 7) 16 else 14
+        sido?.name in listOf("서울특별시", "부산광역시", "인천광역시", "대구광역시",
+            "대전광역시", "광주광역시", "울산광역시") -> 13
+        sido?.name == "세종특별자치시" -> 14
+        else -> 11
+    }
     // Let the search form scroll in its own space; a long error must never hide controls.
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val mapHeight = (maxHeight * 0.48f).coerceIn(150.dp, 330.dp)
         Column(Modifier.fillMaxSize()) {
             KakaoApartmentMap(apartment, region, if (dong != null) 3 else if (sigungu != null) 2 else 1,
-                focusRequest, mapHeight, showMap, onSelect)
+                focusRequest, mapHeight, showMap, onSelect, initialZoom)
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("지역을 선택하면 지도 중심과 화면 안 실거래 단지를 갱신합니다.", style = MaterialTheme.typography.bodySmall)
