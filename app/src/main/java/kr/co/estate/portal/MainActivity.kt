@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -367,9 +368,32 @@ fun AppMessageDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(
-                Modifier.fillMaxWidth().height(180.dp).verticalScroll(rememberScrollState())
-            ) { Text(message) }
+            val scroll = rememberScrollState()
+            Box(
+                Modifier.fillMaxWidth().height(200.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    Modifier.fillMaxSize().padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 20.dp)
+                        .verticalScroll(scroll)
+                ) {
+                    Text(message, style = MaterialTheme.typography.bodyMedium)
+                }
+                // Persistent scrollbar track and proportional thumb, independent of text length.
+                Canvas(Modifier.align(Alignment.CenterEnd).width(5.dp).fillMaxHeight()) {
+                    drawRect(color = Color.LightGray.copy(alpha = 0.45f))
+                    val range = scroll.maxValue
+                    val viewport = size.height
+                    val thumbHeight = if (range <= 0) viewport else
+                        (viewport * viewport / (viewport + range.toFloat()))
+                            .coerceIn(20.dp.toPx(), viewport)
+                    val offset = if (range <= 0) 0f else
+                        (scroll.value.toFloat() / range) * (viewport - thumbHeight)
+                    drawRect(color = Color.Gray, topLeft = Offset(0f, offset),
+                        size = Size(size.width, thumbHeight))
+                }
+            }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("확인") }
