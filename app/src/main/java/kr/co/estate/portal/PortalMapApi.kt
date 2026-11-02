@@ -135,9 +135,9 @@ internal data class RegionMarker(
 )
 
 internal fun regionLevel(zoom: Int): Int = when {
-    zoom >= 11 -> 11 // Kakao zoom: larger numbers mean farther away
-    zoom >= 8 -> 8
-    zoom >= 5 -> 5
+    zoom <= 11 -> 11 // Kakao zoom: smaller values show a wider area
+    zoom <= 13 -> 8
+    zoom <= 15 -> 5
     else -> 3
 }
 
