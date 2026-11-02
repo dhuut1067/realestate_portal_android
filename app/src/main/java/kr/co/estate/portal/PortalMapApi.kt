@@ -128,6 +128,36 @@ internal suspend fun loadViewportApartments(
     return apartments.values.toList()
 }
 
+
+internal data class RegionMarker(
+    val code: String, val name: String, val type: String,
+    val count: Int, val latitude: Double, val longitude: Double
+)
+
+internal fun regionLevel(zoom: Int): Int = when {
+    zoom >= 11 -> 11 // Kakao zoom: larger numbers mean farther away
+    zoom >= 8 -> 8
+    zoom >= 5 -> 5
+    else -> 3
+}
+
+internal suspend fun loadViewportRegions(bounds: MapBounds, level: Int): List<RegionMarker> {
+    require(level in listOf(5, 8, 11))
+    val rows = jsonRows(portalJson("/api/apartments-in-view/?west=${bounds.west}&south=${bounds.south}" +
+        "&east=${bounds.east}&north=${bounds.north}&level=$level&limit=500"))
+    return (0 until rows.length()).mapNotNull { index ->
+        val row = rows.optJSONObject(index) ?: return@mapNotNull null
+        if (row.text("kind") != "region") return@mapNotNull null
+        val lat = row.number("latitude", "lat") ?: return@mapNotNull null
+        val lng = row.number("longitude", "lng", "lon") ?: return@mapNotNull null
+        val code = row.text("regionCode", "region_code")
+        val name = row.text("regionName", "region_name", "name")
+        if (code.isBlank() || name.isBlank()) return@mapNotNull null
+        RegionMarker(code, name, row.text("regionType", "region_type"),
+            row.optInt("complexCount", row.optInt("complex_count", 0)), lat, lng)
+    }.distinctBy { it.code }
+}
+
 internal suspend fun resolveApartment(apartment: ServerApartment): ServerApartment {
     if (apartment.latitude != null && apartment.longitude != null) return apartment
     val rows = jsonRows(portalJson("/api/app/apartments/search/?q=${encoded(apartment.name)}&limit=200"))
