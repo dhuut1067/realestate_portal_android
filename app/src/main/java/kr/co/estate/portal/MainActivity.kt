@@ -10,6 +10,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -329,7 +330,8 @@ private fun areaLabel(area: Double, pyeong: Boolean) = if (pyeong) String.format
     var address by rememberSaveable { mutableStateOf("") }
     var detail by rememberSaveable { mutableStateOf("") }
     AlertDialog(onDismissRequest=dismiss,title={Text("$type 등록 초안")},text={
-        Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().height(240.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement=Arrangement.spacedBy(12.dp)) {
             Text("작성 내용을 기기에 저장합니다. 실제 접수는 서버 연결 후 가능합니다.")
             OutlinedTextField(name,{name=it},label={Text(if(type=="중개사") "중개사무소명" else "단지명")},singleLine=true)
             OutlinedTextField(address,{address=it},label={Text("주소")},singleLine=true)
@@ -352,3 +354,28 @@ private fun areaLabel(area: Double, pyeong: Boolean) = if (pyeong) String.format
 @Composable private fun PhonePreview() { EstateTheme { PortalApp() } }
 @Preview(showBackground=true,widthDp=800,heightDp=1100)
 @Composable private fun TabletPreview() { EstateTheme { PortalApp() } }
+
+/** Shared fixed-height scrollable message window. Actions remain anchored below the message. */
+@Composable
+fun AppMessageDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+    onRetry: (() -> Unit)? = null
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().height(180.dp).verticalScroll(rememberScrollState())
+            ) { Text(message) }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("확인") }
+        },
+        dismissButton = {
+            if (onRetry != null) TextButton(onClick = onRetry) { Text("다시 조회") }
+        }
+    )
+}
