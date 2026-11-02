@@ -25,11 +25,17 @@ private fun <T> ChoiceField(
     if (open && enabled) AlertDialog(
         onDismissRequest = { open = false }, title = { Text("$title 선택") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.fillMaxWidth().height(320.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("서버에서 목록을 불러오는 중입니다.") }
-                failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                failure?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.heightIn(max = 64.dp).verticalScroll(rememberScrollState()))
+                }
                 if (!loading && options.isEmpty() && failure == null) Text("해당 지역의 등록 목록이 없습니다.")
-                LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
                     items(options.size) { i ->
                         val option = options[i]
                         TextButton(onClick = { open = false; onChoose(option) }, modifier = Modifier.fillMaxWidth()) {
